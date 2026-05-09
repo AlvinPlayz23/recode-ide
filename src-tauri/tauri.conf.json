@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Recode",
+  "version": "0.1.0",
+  "identifier": "dev.recode.ide",
+  "build": {
+    "beforeDevCommand": "pnpm web:dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm web:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Recode",
+        "width": 1360,
+        "height": 880,
+        "minWidth": 980,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* https://api.openai.com https://openrouter.ai https://api.anthropic.com https://generativelanguage.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob: https:; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'",
+      "capabilities": ["main-capability"],
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["recode"]
+      }
+    },
+    "fs": {
+      "requireLiteralLeadingDot": false
+    }
+  }
+}
