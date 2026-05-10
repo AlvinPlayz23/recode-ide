@@ -787,6 +787,29 @@ kbd {
   font-variant-ligatures: none;
 }
 
+.editor-line.diagnostic-error code {
+  text-decoration: underline wavy var(--error);
+  text-underline-offset: 3px;
+}
+
+.editor-line.diagnostic-warning code {
+  text-decoration: underline wavy var(--warning);
+  text-underline-offset: 3px;
+}
+
+.editor-line.diagnostic-info code {
+  text-decoration: underline dotted var(--info);
+  text-underline-offset: 3px;
+}
+
+.editor-line.diagnostic-error .line-number {
+  color: var(--error);
+}
+
+.editor-line.diagnostic-warning .line-number {
+  color: var(--warning);
+}
+
 .line-number {
   line-height: 22px;
   padding-right: 12px;
@@ -852,6 +875,55 @@ kbd {
 .editor-input-layer::selection {
   background: var(--selection-bg);
   color: transparent;
+}
+
+.completion-dropdown {
+  position: absolute;
+  z-index: 8;
+  display: grid;
+  width: 280px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--tertiary-bg);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+  font-family: var(--font-sans);
+}
+
+.completion-dropdown button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--text-light);
+  padding: 0 8px;
+  text-align: left;
+}
+
+.completion-dropdown button:hover,
+.completion-dropdown button.selected {
+  background: var(--selected);
+  color: var(--text);
+}
+
+.completion-label,
+.completion-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completion-label {
+  font-size: var(--ui-text-sm);
+}
+
+.completion-detail {
+  color: var(--text-lighter);
+  font-size: var(--ui-text-xs);
 }
 
 .editor-empty {
@@ -1338,6 +1410,10 @@ kbd {
   background: var(--hover-strong);
 }
 
+.command-list button.selected {
+  background: var(--selected);
+}
+
 .command-list button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
@@ -1375,4 +1451,217 @@ kbd {
   text-align: center;
   color: var(--text-lighter);
   font-size: var(--ui-text-sm);
+}
+
+/* ============================================================
+ * Quick open / search / source control
+ * ============================================================ */
+
+.quick-open .command-list {
+  max-height: 460px;
+}
+
+.sidebar-search-form {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin: 8px;
+  padding: 0 8px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--primary-bg);
+  color: var(--text-lighter);
+}
+
+.sidebar-search-form input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--ui-text-sm);
+}
+
+.search-summary,
+.git-section-title,
+.git-diff-title {
+  padding: 6px 10px;
+  color: var(--text-lighter);
+  font-size: var(--ui-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.search-results,
+.git-list {
+  overflow: auto;
+  min-height: 0;
+}
+
+.search-result-row,
+.git-file-row {
+  display: grid;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-light);
+  text-align: left;
+}
+
+.search-result-row {
+  gap: 2px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.search-result-row:hover,
+.git-file-row:hover,
+.git-file-row.active {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+.search-result-file {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--ui-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-meta,
+.search-result-excerpt {
+  overflow: hidden;
+  color: var(--text-lighter);
+  font-size: var(--ui-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-control-panel {
+  display: grid;
+  grid-template-rows: 32px 28px auto minmax(0, 1fr) minmax(120px, 38%);
+}
+
+.git-section {
+  padding: 4px 0;
+}
+
+.git-section-title {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 8px;
+}
+
+.git-file-row {
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: var(--ui-text-sm);
+}
+
+.git-status-pill {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.git-status-pill.deleted {
+  background: rgba(239, 111, 111, 0.14);
+  color: var(--error);
+}
+
+.git-status-pill.untracked,
+.git-status-pill.added {
+  background: rgba(95, 207, 128, 0.14);
+  color: var(--success);
+}
+
+.git-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff-preview {
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--primary-bg);
+}
+
+.git-diff-preview pre {
+  height: calc(100% - 28px);
+  margin: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  color: var(--text-light);
+  font: 11px / 1.45 var(--font-mono);
+  white-space: pre;
+}
+
+/* ============================================================
+ * Toasts
+ * ============================================================ */
+
+.toast-viewport {
+  position: fixed;
+  right: 14px;
+  bottom: 36px;
+  z-index: 120;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 28px));
+}
+
+.toast-message {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-md);
+  background: var(--tertiary-bg);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+}
+
+.toast-message.success {
+  border-left-color: var(--success);
+}
+
+.toast-message.error {
+  border-left-color: var(--error);
+}
+
+.toast-message.warning {
+  border-left-color: var(--warning);
+}
+
+.toast-content {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.toast-content strong {
+  color: var(--text);
+  font-size: var(--ui-text-sm);
+}
+
+.toast-content span {
+  overflow: hidden;
+  color: var(--text-lighter);
+  font-size: var(--ui-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -4,6 +4,7 @@ import {
   readFile,
   writeFile,
 } from "@/features/file-explorer/services/file-service";
+import { useToastStore } from "@/features/notifications/stores/toast-store";
 import { useFileWatcherStore } from "@/features/project/stores/file-watcher-store";
 
 export interface EditorPosition {
@@ -171,6 +172,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       useFileWatcherStore.getState().actions.markPendingSave(buffer.path);
       const saved = await writeFile(buffer.path, buffer.content);
       if (!saved) {
+        useToastStore.getState().actions.error("Save failed", buffer.path);
         set({
           lastSaveError: `Could not save ${buffer.name}`,
           lastSaveStatus: "error",
@@ -187,19 +189,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : candidate,
         ),
       }));
+      useToastStore.getState().actions.success("Saved", buffer.name);
       return true;
     },
     saveBufferAs: async (bufferId) => {
       const buffer = get().buffers.find((candidate) => candidate.id === bufferId);
       if (!buffer) return false;
 
-      const nextPath = await pickSaveFilePath(buffer.path);
+      const nextPath = await pickSaveFilePath(buffer.name);
       if (!nextPath) return false;
+      if (nextPath === buffer.path) {
+        return await get().actions.saveBuffer(bufferId);
+      }
 
       set({ lastSaveError: null, lastSaveStatus: "saving" });
       useFileWatcherStore.getState().actions.markPendingSave(nextPath);
       const saved = await writeFile(nextPath, buffer.content);
       if (!saved) {
+        useToastStore.getState().actions.error("Save As failed", nextPath);
         set({
           lastSaveError: `Could not save ${buffer.name}`,
           lastSaveStatus: "error",
@@ -225,6 +232,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : candidate,
         ),
       }));
+      useToastStore.getState().actions.success("Saved As", basename(nextPath));
       return true;
     },
     saveActiveBuffer: async () => {
@@ -243,6 +251,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       const content = await readFile(buffer.path);
       if (content === null) {
+        useToastStore.getState().actions.error("Revert failed", buffer.path);
         set({
           lastSaveError: `Could not reload ${buffer.name}`,
           lastSaveStatus: "error",

@@ -4,9 +4,11 @@ use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, SystemTime};
 use tauri::Emitter;
 use tauri::Manager;
@@ -58,6 +60,94 @@ struct TerminalCommandOutput {
     code: Option<i32>,
     stdout: String,
     stderr: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspDiagnosticsRequest {
+    file_path: String,
+    content: String,
+    language_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCompletionsRequest {
+    content: String,
+    language_id: String,
+    line: usize,
+    character: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspRangePosition {
+    line: usize,
+    character: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspRange {
+    start: LspRangePosition,
+    end: LspRangePosition,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecodeDiagnostic {
+    file_path: String,
+    range: LspRange,
+    severity: String,
+    message: String,
+    source: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecodeCompletionItem {
+    label: String,
+    detail: String,
+    kind: String,
+    insert_text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSpawnRequest {
+    cwd: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalWriteRequest {
+    session_id: String,
+    input: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputEvent {
+    session_id: String,
+    stream: String,
+    text: String,
+}
+
+struct TerminalSession {
+    child: Child,
+    stdin: ChildStdin,
+}
+
+struct TerminalSessions {
+    sessions: Mutex<HashMap<String, TerminalSession>>,
+}
+
+impl TerminalSessions {
+    fn new() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -443,12 +533,104 @@ fn terminal_run(request: TerminalCommandRequest) -> Result<TerminalCommandOutput
 }
 
 #[tauri::command]
-fn terminal_spawn() -> Result<String, String> {
-    Ok("command-terminal".to_string())
+fn terminal_spawn(
+    app: tauri::AppHandle,
+    sessions: tauri::State<'_, Arc<TerminalSessions>>,
+    request: TerminalSpawnRequest,
+) -> Result<String, String> {
+    let session_id = format!(
+        "terminal-{}",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_millis()
+    );
+
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = Command::new("powershell");
+        command.args(["-NoLogo", "-NoProfile"]);
+        command
+    } else {
+        let mut command = Command::new("sh");
+        command.arg("-i");
+        command
+    };
+
+    if let Some(cwd) = request.cwd {
+        command.current_dir(cwd);
+    }
+
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Terminal stdin unavailable".to_string())?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    if let Some(stdout) = stdout {
+        pipe_terminal_stream(app.clone(), session_id.clone(), "stdout", stdout);
+    }
+    if let Some(stderr) = stderr {
+        pipe_terminal_stream(app.clone(), session_id.clone(), "stderr", stderr);
+    }
+
+    sessions
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal session lock poisoned".to_string())?
+        .insert(session_id.clone(), TerminalSession { child, stdin });
+
+    let _ = app.emit(
+        "terminal-output",
+        TerminalOutputEvent {
+            session_id: session_id.clone(),
+            stream: "system".to_string(),
+            text: "Shell session started\n".to_string(),
+        },
+    );
+
+    Ok(session_id)
 }
 
 #[tauri::command]
-fn terminal_write(_session_id: String, _input: String) -> Result<(), String> {
+fn terminal_write(
+    sessions: tauri::State<'_, Arc<TerminalSessions>>,
+    request: TerminalWriteRequest,
+) -> Result<(), String> {
+    let mut guard = sessions
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal session lock poisoned".to_string())?;
+    let session = guard
+        .get_mut(&request.session_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?;
+    session
+        .stdin
+        .write_all(request.input.as_bytes())
+        .map_err(|error| error.to_string())?;
+    session.stdin.flush().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_kill(
+    sessions: tauri::State<'_, Arc<TerminalSessions>>,
+    session_id: String,
+) -> Result<(), String> {
+    let mut guard = sessions
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal session lock poisoned".to_string())?;
+    if let Some(mut session) = guard.remove(&session_id) {
+        let _ = session.child.kill();
+    }
     Ok(())
 }
 
@@ -460,6 +642,86 @@ fn lsp_start(_workspace_path: String, _language_id: String) -> Result<String, St
 #[tauri::command]
 fn lsp_request(_session_id: String, _method: String, _params: serde_json::Value) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+fn lsp_get_diagnostics(request: LspDiagnosticsRequest) -> Result<Vec<RecodeDiagnostic>, String> {
+    let mut diagnostics = Vec::new();
+    let mut bracket_stack: Vec<(char, usize, usize)> = Vec::new();
+
+    for (line_index, line) in request.content.lines().enumerate() {
+        if let Some(column) = line.find("TODO") {
+            diagnostics.push(RecodeDiagnostic {
+                file_path: request.file_path.clone(),
+                range: diagnostic_range(line_index, column, column + 4),
+                severity: "info".to_string(),
+                message: "TODO marker".to_string(),
+                source: "recode-lsp".to_string(),
+            });
+        }
+
+        for (character, value) in line.chars().enumerate() {
+            match value {
+                '(' | '[' | '{' => bracket_stack.push((value, line_index, character)),
+                ')' | ']' | '}' => {
+                    if !matches_bracket(bracket_stack.last().map(|entry| entry.0), value) {
+                        diagnostics.push(RecodeDiagnostic {
+                            file_path: request.file_path.clone(),
+                            range: diagnostic_range(line_index, character, character + 1),
+                            severity: "warning".to_string(),
+                            message: format!("Unmatched closing bracket `{value}`"),
+                            source: "recode-lsp".to_string(),
+                        });
+                    } else {
+                        bracket_stack.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if request.language_id == "json" {
+        if let Err(error) = serde_json::from_str::<serde_json::Value>(&request.content) {
+            diagnostics.push(RecodeDiagnostic {
+                file_path: request.file_path,
+                range: diagnostic_range(error.line().saturating_sub(1), error.column().saturating_sub(1), error.column()),
+                severity: "error".to_string(),
+                message: error.to_string(),
+                source: "json".to_string(),
+            });
+            return Ok(diagnostics);
+        }
+    }
+
+    for (_, line, character) in bracket_stack.into_iter().take(20) {
+        diagnostics.push(RecodeDiagnostic {
+            file_path: request.file_path.clone(),
+            range: diagnostic_range(line, character, character + 1),
+            severity: "warning".to_string(),
+            message: "Unclosed bracket".to_string(),
+            source: "recode-lsp".to_string(),
+        });
+    }
+
+    Ok(diagnostics)
+}
+
+#[tauri::command]
+fn lsp_get_completions(request: LspCompletionsRequest) -> Result<Vec<RecodeCompletionItem>, String> {
+    let prefix = completion_prefix(&request.content, request.line, request.character);
+    let keywords = completion_keywords(&request.language_id);
+    Ok(keywords
+        .into_iter()
+        .filter(|label| prefix.is_empty() || label.starts_with(&prefix))
+        .take(40)
+        .map(|label| RecodeCompletionItem {
+            label: label.to_string(),
+            detail: format!("{} keyword", request.language_id),
+            kind: "keyword".to_string(),
+            insert_text: label.to_string(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -593,6 +855,73 @@ fn status_label(flags: Status, staged: bool) -> String {
     "modified".to_string()
 }
 
+fn pipe_terminal_stream<R>(app: tauri::AppHandle, session_id: String, stream: &'static str, reader: R)
+where
+    R: std::io::Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let reader = BufReader::new(reader);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app.emit(
+                "terminal-output",
+                TerminalOutputEvent {
+                    session_id: session_id.clone(),
+                    stream: stream.to_string(),
+                    text: format!("{line}\n"),
+                },
+            );
+        }
+    });
+}
+
+fn diagnostic_range(line: usize, start: usize, end: usize) -> LspRange {
+    LspRange {
+        start: LspRangePosition { line, character: start },
+        end: LspRangePosition {
+            line,
+            character: end.max(start + 1),
+        },
+    }
+}
+
+fn matches_bracket(open: Option<char>, close: char) -> bool {
+    matches!(
+        (open, close),
+        (Some('('), ')') | (Some('['), ']') | (Some('{'), '}')
+    )
+}
+
+fn completion_prefix(content: &str, line: usize, character: usize) -> String {
+    let line_text = content.lines().nth(line).unwrap_or_default();
+    let prefix_end = character.min(line_text.len());
+    let before_cursor = &line_text[..prefix_end];
+    before_cursor
+        .chars()
+        .rev()
+        .take_while(|value| value.is_ascii_alphanumeric() || *value == '_')
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
+}
+
+fn completion_keywords(language_id: &str) -> Vec<&'static str> {
+    match language_id {
+        "rust" => vec![
+            "async", "await", "break", "const", "continue", "crate", "enum", "fn", "impl", "let",
+            "match", "mod", "move", "mut", "pub", "return", "self", "struct", "trait", "use",
+            "where",
+        ],
+        "typescript" | "typescriptreact" => vec![
+            "async", "await", "const", "export", "extends", "function", "import", "interface",
+            "let", "return", "type", "useEffect", "useRef", "useState",
+        ],
+        "json" => vec!["false", "null", "true"],
+        "css" => vec!["display", "flex", "grid", "position", "color", "background", "border"],
+        _ => vec!["TODO", "fixme", "note"],
+    }
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -616,6 +945,7 @@ pub fn run() {
     builder
         .setup(|app| {
             app.manage(Arc::new(FileWatcher::new(app.handle().clone())));
+            app.manage(Arc::new(TerminalSessions::new()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -635,8 +965,11 @@ pub fn run() {
             terminal_run,
             terminal_spawn,
             terminal_write,
+            terminal_kill,
             lsp_start,
             lsp_request,
+            lsp_get_diagnostics,
+            lsp_get_completions,
             ai_set_token,
             ai_get_token
         ])

@@ -94,7 +94,9 @@ Goal: centralize all user actions.
 - Command routing for sidebar/activity views.
 
 ### Milestone 6: Terminal PTY
-Goal: replace command-runner terminal with real interactive terminals.
+Goal: replace the interim shell-session terminal with real interactive PTY terminals.
+
+Current notice: Recode now has a persistent shell-session terminal backed by Tauri events. This is useful enough for basic commands, but it is not a full PTY/xterm implementation yet. Full terminal work is intentionally deferred until after LSP diagnostics/completions.
 
 - Rust terminal manager with create/write/resize/close.
 - Shell detection/listing.
@@ -203,9 +205,9 @@ The next work should not jump directly to AI. Finish the basic IDE foundation fi
 2. Dirty close/save-as/revert protections.
 3. Command/keymap registry.
 4. Source control panel.
-5. Real PTY terminal.
-6. Quick open and workspace search.
-7. LSP diagnostics/completions.
+5. LSP diagnostics/completions.
+6. Real PTY terminal.
+7. Quick open and workspace search.
 
 AI becomes much more useful after these primitives are reliable because agent workflows depend on safe file edits, command execution, search, git diff, and diagnostics.
 
@@ -215,4 +217,3 @@ AI becomes much more useful after these primitives are reliable because agent wo
 - Run Rust checks when Rust command signatures or dependencies change.
 - Smoke test in Tauri for anything touching plugins, filesystem, terminal, git, or app startup.
 - Every milestone should include at least one manual test path and one automated test target where practical.
-

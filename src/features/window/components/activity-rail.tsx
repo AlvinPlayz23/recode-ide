@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   BugIcon,
   ExtensionIcon,
@@ -19,7 +18,8 @@ const PRIMARY_VIEWS = [
 ] as const;
 
 export function ActivityRail() {
-  const [active, setActive] = useState<string>("files");
+  const active = useWorkbenchStore((state) => state.activeSidebarView);
+  const setActive = useWorkbenchStore((state) => state.actions.setActiveSidebarView);
   const isInspectorVisible = useWorkbenchStore((state) => state.isInspectorVisible);
   const toggleInspector = useWorkbenchStore((state) => state.actions.toggleInspector);
 

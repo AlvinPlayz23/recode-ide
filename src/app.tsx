@@ -1,19 +1,26 @@
 import { useEffect } from "react";
 import { AiPanel } from "@/features/ai/components/ai-panel";
 import { CommandPalette } from "@/features/command-palette/components/command-palette";
+import { useGlobalKeymaps } from "@/features/commands/hooks/use-global-keymaps";
+import { useRegisterCoreCommands } from "@/features/commands/hooks/use-register-core-commands";
 import { HybridEditor } from "@/features/editor/components/hybrid-editor";
 import { useEditorStore } from "@/features/editor/stores/editor-store";
-import { FileExplorer } from "@/features/file-explorer/components/file-explorer";
 import { useFileWatcherStore } from "@/features/project/stores/file-watcher-store";
+import { ToastViewport } from "@/features/notifications/components/toast-viewport";
 import { useProjectStore } from "@/features/project/stores/project-store";
+import { QuickOpen } from "@/features/quick-open/components/quick-open";
 import { TerminalPanel } from "@/features/terminal/components/terminal-panel";
 import { TabBar } from "@/features/tabs/components/tab-bar";
 import { ActivityRail } from "@/features/window/components/activity-rail";
+import { SidebarPanel } from "@/features/window/components/sidebar-panel";
 import { StatusBar } from "@/features/window/components/status-bar";
 import { TitleBar } from "@/features/window/components/title-bar";
 import { useWorkbenchStore } from "@/features/window/stores/workbench-store";
 
 export function App() {
+  useRegisterCoreCommands();
+  useGlobalKeymaps();
+
   const activeBuffer = useEditorStore((state) =>
     state.buffers.find((buffer) => buffer.id === state.activeBufferId),
   );
@@ -42,7 +49,7 @@ export function App() {
         }`}
       >
         <ActivityRail />
-        <FileExplorer />
+        <SidebarPanel />
         <section className="editor-column">
           <TabBar />
           <HybridEditor buffer={activeBuffer ?? null} />
@@ -52,6 +59,8 @@ export function App() {
       </main>
       <StatusBar />
       <CommandPalette />
+      <QuickOpen />
+      <ToastViewport />
     </div>
   );
 }

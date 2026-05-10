@@ -5,6 +5,9 @@ import { offsetToPosition, useEditorStore } from "@/features/editor/stores/edito
 import type { HighlightToken } from "@/features/editor/utils/tokenize-line";
 import { tokenizeLine } from "@/features/editor/utils/tokenize-line";
 import { tokenizeInWorker } from "@/features/editor/workers/tokenizer-client";
+import { CompletionDropdown } from "@/features/lsp/components/completion-dropdown";
+import { getCompletions, getDiagnostics, type RecodeCompletionItem } from "@/features/lsp/services/lsp-service";
+import { useDiagnosticsStore } from "@/features/lsp/stores/diagnostics-store";
 import { FileIcon } from "@/features/window/components/icons";
 
 interface HybridEditorProps {
@@ -13,6 +16,7 @@ interface HybridEditorProps {
 
 const lineHeight = 22;
 const overscan = 12;
+const emptyDiagnostics: ReturnType<typeof useDiagnosticsStore.getState>["diagnosticsByFile"][string] = [];
 
 export function HybridEditor({ buffer }: HybridEditorProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -29,6 +33,12 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const [viewportHeight, setViewportHeight] = useState(600);
   const [isFindVisible, setIsFindVisible] = useState(false);
   const [tokenizedLines, setTokenizedLines] = useState<HighlightToken[][]>([]);
+  const [completionItems, setCompletionItems] = useState<RecodeCompletionItem[]>([]);
+  const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(0);
+  const setDiagnostics = useDiagnosticsStore((state) => state.actions.setDiagnostics);
+  const diagnostics = useDiagnosticsStore(
+    (state) => (buffer ? (state.diagnosticsByFile[buffer.path] ?? emptyDiagnostics) : emptyDiagnostics),
+  );
 
   const lines = useMemo(() => (buffer?.content ?? "").split("\n"), [buffer?.content]);
   const lineStarts = useMemo(() => buildLineStarts(buffer?.content ?? ""), [buffer?.content]);
@@ -41,6 +51,17 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     () => (buffer ? buildSelectionRects(buffer, lineStarts, startLine, endLine) : []),
     [buffer, endLine, lineStarts, startLine],
   );
+  const diagnosticsByLine = useMemo(() => {
+    const map = new Map<number, "error" | "warning" | "info">();
+    for (const diagnostic of diagnostics) {
+      const existing = map.get(diagnostic.range.start.line);
+      if (existing === "error") continue;
+      if (diagnostic.severity === "error" || !existing || existing === "info") {
+        map.set(diagnostic.range.start.line, diagnostic.severity);
+      }
+    }
+    return map;
+  }, [diagnostics]);
 
   useEffect(() => {
     if (!viewportRef.current) return;
@@ -83,6 +104,25 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     scrollSelectionIntoView(inputRef.current, buffer);
   }, [buffer?.activeSearchMatchIndex]);
 
+  useEffect(() => {
+    if (!buffer) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void getDiagnostics({
+        filePath: buffer.path,
+        content: buffer.content,
+        languageId: buffer.languageId,
+      }).then((nextDiagnostics) => {
+        if (!cancelled) setDiagnostics(buffer.path, nextDiagnostics);
+      });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [buffer?.content, buffer?.languageId, buffer?.path, setDiagnostics]);
+
   if (!buffer) {
     return (
       <section className="editor-empty">
@@ -99,6 +139,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   }
 
   const handleInput = (content: string) => {
+    setCompletionItems([]);
     updateBufferContent(buffer.id, content);
     const input = inputRef.current;
     if (!input) return;
@@ -120,6 +161,35 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (completionItems.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSelectedCompletionIndex((index) => Math.min(index + 1, completionItems.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelectedCompletionIndex((index) => Math.max(index - 1, 0));
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        applyCompletion(completionItems[selectedCompletionIndex]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCompletionItems([]);
+        return;
+      }
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key === " ") {
+      event.preventDefault();
+      void requestCompletions();
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void saveBuffer(buffer.id);
@@ -172,6 +242,39 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
       setSelection(buffer.id, { start: nextOffset, end: nextOffset });
       setCursor(buffer.id, offsetToPosition(nextValue, nextOffset));
     }
+  };
+
+  const requestCompletions = async () => {
+    const input = inputRef.current;
+    if (!input) return;
+    const position = offsetToPosition(input.value, input.selectionEnd);
+    const items = await getCompletions({
+      content: input.value,
+      languageId: buffer.languageId,
+      line: position.line,
+      character: position.column,
+    });
+    setSelectedCompletionIndex(0);
+    setCompletionItems(items);
+  };
+
+  const applyCompletion = (item?: RecodeCompletionItem) => {
+    if (!item) return;
+    const input = inputRef.current;
+    if (!input) return;
+
+    const start = findWordStart(input.value, input.selectionStart);
+    const end = input.selectionEnd;
+    const nextValue = input.value.slice(0, start) + item.insertText + input.value.slice(end);
+    const nextOffset = start + item.insertText.length;
+
+    input.value = nextValue;
+    input.selectionStart = nextOffset;
+    input.selectionEnd = nextOffset;
+    updateBufferContent(buffer.id, nextValue);
+    setSelection(buffer.id, { start: nextOffset, end: nextOffset });
+    setCursor(buffer.id, offsetToPosition(nextValue, nextOffset));
+    setCompletionItems([]);
   };
 
   return (
@@ -227,8 +330,14 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
           {visibleLines.map((line, index) => {
             const lineNumber = startLine + index + 1;
             const absoluteLineIndex = startLine + index;
+            const diagnosticSeverity = diagnosticsByLine.get(absoluteLineIndex);
             return (
-              <div className="editor-line" key={`${buffer.id}:${lineNumber}`} style={{ height: lineHeight }}>
+              <div
+                className={`editor-line ${diagnosticSeverity ? `diagnostic-${diagnosticSeverity}` : ""}`}
+                key={`${buffer.id}:${lineNumber}`}
+                style={{ height: lineHeight }}
+                title={diagnostics.find((diagnostic) => diagnostic.range.start.line === absoluteLineIndex)?.message}
+              >
                 <span className="line-number">{lineNumber}</span>
                 <code>
                   {renderLineWithSearch(
@@ -259,6 +368,15 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
         onKeyDown={handleKeyDown}
         onSelect={handleSelectionChange}
         onScroll={(event) => setScrollTop(buffer.id, event.currentTarget.scrollTop)}
+      />
+      <CompletionDropdown
+        items={completionItems}
+        selectedIndex={selectedCompletionIndex}
+        line={buffer.cursor.line}
+        column={buffer.cursor.column}
+        scrollTop={scrollTop}
+        onHover={setSelectedCompletionIndex}
+        onSelect={applyCompletion}
       />
     </section>
   );
@@ -368,4 +486,12 @@ function renderTokenizedSegment(segment: string, languageId: string, keyPrefix: 
       {token.value || " "}
     </span>
   ));
+}
+
+function findWordStart(content: string, offset: number) {
+  let index = Math.max(0, offset);
+  while (index > 0 && /[\w$]/.test(content[index - 1])) {
+    index -= 1;
+  }
+  return index;
 }

@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { runTerminalCommand } from "@/features/terminal/services/terminal-service";
+import {
+  killTerminalSession,
+  spawnTerminalSession,
+  writeTerminalSession,
+} from "@/features/terminal/services/terminal-service";
 
 interface TerminalLine {
   id: string;
@@ -9,9 +13,13 @@ interface TerminalLine {
 
 interface TerminalState {
   lines: TerminalLine[];
+  sessionId: string | null;
   isRunning: boolean;
   actions: {
+    appendOutput: (kind: TerminalLine["kind"], text: string) => void;
+    ensureSession: (cwd: string | null) => Promise<void>;
     runCommand: (command: string, cwd: string | null) => Promise<void>;
+    killSession: () => Promise<void>;
   };
 }
 
@@ -20,14 +28,44 @@ export const useTerminalStore = create<TerminalState>((set) => ({
     {
       id: "welcome",
       kind: "system",
-      text: "Command terminal ready. Full PTY support comes next.",
+      text: "Shell terminal ready.",
     },
   ],
+  sessionId: null,
   isRunning: false,
   actions: {
+    appendOutput: (kind, text) => {
+      if (!text) return;
+      set((state) => ({
+        lines: [...state.lines, { id: crypto.randomUUID(), kind, text: text.trimEnd() }],
+      }));
+    },
+    ensureSession: async (cwd) => {
+      if (useTerminalStore.getState().sessionId) return;
+      set({ isRunning: true });
+      try {
+        const sessionId = await spawnTerminalSession(cwd);
+        set({ sessionId, isRunning: false });
+      } catch (error) {
+        set((state) => ({
+          isRunning: false,
+          lines: [
+            ...state.lines,
+            {
+              id: crypto.randomUUID(),
+              kind: "stderr",
+              text: error instanceof Error ? error.message : "Terminal failed to start",
+            },
+          ],
+        }));
+      }
+    },
     runCommand: async (command, cwd) => {
       const trimmed = command.trim();
       if (!trimmed) return;
+      await useTerminalStore.getState().actions.ensureSession(cwd);
+      const sessionId = useTerminalStore.getState().sessionId;
+      if (!sessionId) return;
 
       set((state) => ({
         isRunning: true,
@@ -35,24 +73,8 @@ export const useTerminalStore = create<TerminalState>((set) => ({
       }));
 
       try {
-        const output = await runTerminalCommand(trimmed, cwd);
-        set((state) => ({
-          isRunning: false,
-          lines: [
-            ...state.lines,
-            ...(output.stdout
-              ? [{ id: crypto.randomUUID(), kind: "stdout" as const, text: output.stdout.trimEnd() }]
-              : []),
-            ...(output.stderr
-              ? [{ id: crypto.randomUUID(), kind: "stderr" as const, text: output.stderr.trimEnd() }]
-              : []),
-            {
-              id: crypto.randomUUID(),
-              kind: "system" as const,
-              text: `exit ${output.code ?? 0}`,
-            },
-          ],
-        }));
+        await writeTerminalSession(sessionId, `${trimmed}\n`);
+        set({ isRunning: false });
       } catch (error) {
         set((state) => ({
           isRunning: false,
@@ -66,6 +88,19 @@ export const useTerminalStore = create<TerminalState>((set) => ({
           ],
         }));
       }
+    },
+    killSession: async () => {
+      const sessionId = useTerminalStore.getState().sessionId;
+      if (!sessionId) return;
+      await killTerminalSession(sessionId);
+      set((state) => ({
+        sessionId: null,
+        isRunning: false,
+        lines: [
+          ...state.lines,
+          { id: crypto.randomUUID(), kind: "system", text: "Shell session stopped." },
+        ],
+      }));
     },
   },
 }));

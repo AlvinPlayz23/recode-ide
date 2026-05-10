@@ -1,5 +1,6 @@
 import { useEditorStore } from "@/features/editor/stores/editor-store";
 import { useGitStore } from "@/features/git/stores/git-store";
+import { useDiagnosticsStore } from "@/features/lsp/stores/diagnostics-store";
 import { useProjectStore } from "@/features/project/stores/project-store";
 import { useWorkbenchStore } from "@/features/window/stores/workbench-store";
 import {
@@ -18,6 +19,7 @@ export function StatusBar() {
   const saveStatus = useEditorStore((state) => state.lastSaveStatus);
   const saveError = useEditorStore((state) => state.lastSaveError);
   const gitStatus = useGitStore((state) => state.status);
+  const diagnosticsByFile = useDiagnosticsStore((state) => state.diagnosticsByFile);
   const toggleTerminal = useWorkbenchStore((state) => state.actions.toggleTerminal);
 
   const lineCount = activeBuffer ? activeBuffer.content.split("\n").length : 0;
@@ -25,6 +27,7 @@ export function StatusBar() {
   const workspaceLabel = rootPath ? rootPath.split(/[\\/]/).filter(Boolean).at(-1) : "demo";
   const dirty = activeBuffer ? activeBuffer.content !== activeBuffer.savedContent : false;
   const changedFiles = gitStatus?.files.length ?? 0;
+  const issueCount = Object.values(diagnosticsByFile).reduce((total, diagnostics) => total + diagnostics.length, 0);
 
   return (
     <footer className="status-bar">
@@ -45,7 +48,7 @@ export function StatusBar() {
           <span className="status-icon">
             <ErrorIcon />
           </span>
-          0 issues
+          {issueCount} issues
         </span>
         <span className="status-item">{workspaceLabel}</span>
       </div>

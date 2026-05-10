@@ -20,8 +20,19 @@ export async function writeFile(path: string, content: string): Promise<boolean>
 
 export async function pickSaveFilePath(defaultPath?: string): Promise<string | null> {
   try {
-    return await save({ defaultPath });
-  } catch {
+    return await save({
+      title: "Save As",
+      defaultPath,
+      filters: [
+        { name: "All Files", extensions: ["*"] },
+        {
+          name: "Text Files",
+          extensions: ["txt", "md", "json", "js", "ts", "tsx", "jsx", "css", "html", "rs", "toml"],
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("Save As dialog failed", error);
     return null;
   }
 }
