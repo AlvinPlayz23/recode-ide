@@ -129,22 +129,23 @@ Goal: make project navigation fast.
 - Workspace text search with include/exclude filters.
 - Recent files and frecency scoring.
 - Go to line, go to symbol, breadcrumbs.
-- Outline panel from parser/LSP symbols.
-- References panel and search result previews.
+- Outline panel from parser/LSP symbols. Initial Recode LSP-facade outline is implemented; later it should read from real LSP document symbols.
+- References panel and search result previews. Initial workspace reference scanning is implemented for text files; later replace reference resolution with real LSP results.
 
 ### Milestone 9: Tree-Sitter, LSP, Diagnostics, And Formatting
 Goal: move from text editor to code editor.
 
+- Editor stability pass: shared editor geometry constants, horizontal scroll/render alignment, large-file guardrails, programmatic content synchronization, and content+selection undo snapshots are implemented. Continue hardening custom editor edge cases before real LSP replacement.
 - Tree-sitter parser asset pipeline for common languages.
 - Incremental/viewport tokenization worker.
 - Fold regions and folding gutter.
 - LSP manager: start/stop per workspace/file, document open/change/save/close.
-- Current LSP backend is a Recode facade for diagnostics/completions. Later, swap it to a real external LSP manager using Athas' `LspManager` pattern while keeping the frontend service API stable.
-- Hover, completions, signature help, go to definition, references.
-- Rename symbol and workspace edits.
-- Diagnostics store and diagnostics panel.
-- Code actions, format document, lint hooks.
-- Inlay hints, semantic tokens, code lens.
+- Current LSP backend is a Recode facade for diagnostics/completions/document symbols/hover/definition. Later, swap it to a real external LSP manager using Athas' `LspManager` pattern while keeping the frontend service API stable.
+- Hover, completions, signature help, go to definition, references. Initial hover and same-file definition navigation are implemented with facade heuristics. Signature help is intentionally disabled in the frontend until the real LSP manager is available; the backend API shape remains dormant for that phase.
+- Rename symbol and workspace edits. Initial same-file facade rename and shared workspace edit application are implemented.
+- Diagnostics store and diagnostics panel. Initial filtering, severity scope, current-file scope, and click-to-location navigation are implemented.
+- Code actions, format document, lint hooks. Initial quick-fix code actions and document formatting are implemented; later replace with real LSP formatting/code actions.
+- Inlay hints, semantic tokens, code lens. Initial inlay hints and semantic token rendering are implemented with facade heuristics; code lens remains pending.
 
 ### Milestone 10: AI Chat And Provider Settings
 Goal: build the AI cockpit layer.

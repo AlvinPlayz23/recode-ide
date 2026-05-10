@@ -10,6 +10,11 @@ import {
   notifyDocumentOpen,
   notifyDocumentSave,
 } from "@/features/lsp/services/lsp-service";
+import {
+  EDITOR_LINE_HEIGHT,
+  EDITOR_MAX_UNDO_ENTRIES,
+  EDITOR_UNDO_GROUP_MS,
+} from "@/features/editor/config/editor-constants";
 import { useToastStore } from "@/features/notifications/stores/toast-store";
 import { useFileWatcherStore } from "@/features/project/stores/file-watcher-store";
 
@@ -29,6 +34,14 @@ export interface SearchMatch {
   end: number;
 }
 
+interface UndoSnapshot {
+  content: string;
+  selection: EditorSelection;
+  cursor: EditorPosition;
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 export interface EditorBuffer {
   id: string;
   path: string;
@@ -39,11 +52,12 @@ export interface EditorBuffer {
   cursor: EditorPosition;
   selection: EditorSelection;
   scrollTop: number;
+  scrollLeft: number;
   searchQuery: string;
   searchMatches: SearchMatch[];
   activeSearchMatchIndex: number;
-  undoStack: string[];
-  redoStack: string[];
+  undoStack: UndoSnapshot[];
+  redoStack: UndoSnapshot[];
   lastEditAt: number;
   externalState: "none" | "modified" | "deleted";
   lspVersion: number;
@@ -73,6 +87,8 @@ interface EditorState {
     setCursor: (bufferId: string, cursor: EditorPosition) => void;
     setSelection: (bufferId: string, selection: EditorSelection) => void;
     setScrollTop: (bufferId: string, scrollTop: number) => void;
+    setScrollPosition: (bufferId: string, scrollTop: number, scrollLeft: number) => void;
+    revealPosition: (bufferId: string, line: number, column?: number) => void;
     setSearchQuery: (bufferId: string, query: string) => void;
     goToSearchMatch: (bufferId: string, direction: 1 | -1) => void;
     undo: (bufferId: string) => void;
@@ -86,8 +102,6 @@ interface EditorState {
 }
 
 const createBufferId = (path: string) => `buffer:${path}`;
-const undoGroupMs = 900;
-const maxUndoEntries = 100;
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   buffers: [],
@@ -112,6 +126,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         cursor: { line: 0, column: 0, offset: 0 },
         selection: { start: 0, end: 0 },
         scrollTop: 0,
+        scrollLeft: 0,
         searchQuery: "",
         searchMatches: [],
         activeSearchMatchIndex: -1,
@@ -159,9 +174,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           const shouldPushUndo =
             options?.pushUndo !== false &&
             buffer.content !== content &&
-            (now - buffer.lastEditAt > undoGroupMs || buffer.undoStack.length === 0);
+            (now - buffer.lastEditAt > EDITOR_UNDO_GROUP_MS || buffer.undoStack.length === 0);
           const undoStack = shouldPushUndo
-            ? [...buffer.undoStack, buffer.content].slice(-maxUndoEntries)
+            ? [...buffer.undoStack, snapshotBuffer(buffer)].slice(-EDITOR_MAX_UNDO_ENTRIES)
             : buffer.undoStack;
           const searchMatches = findSearchMatches(content, buffer.searchQuery);
           const lspVersion = buffer.lspVersion + 1;
@@ -308,7 +323,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 content,
                 savedContent: content,
                 externalState: "none",
-                undoStack: [...candidate.undoStack, candidate.content].slice(-maxUndoEntries),
+                undoStack: [...candidate.undoStack, snapshotBuffer(candidate)].slice(
+                  -EDITOR_MAX_UNDO_ENTRIES,
+                ),
                 redoStack: [],
               }
             : candidate,
@@ -335,6 +352,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         buffers: state.buffers.map((buffer) =>
           buffer.id === bufferId ? { ...buffer, scrollTop } : buffer,
         ),
+      }));
+    },
+    setScrollPosition: (bufferId, scrollTop, scrollLeft) => {
+      set((state) => ({
+        buffers: state.buffers.map((buffer) =>
+          buffer.id === bufferId ? { ...buffer, scrollTop, scrollLeft } : buffer,
+        ),
+      }));
+    },
+    revealPosition: (bufferId, line, column = 0) => {
+      set((state) => ({
+        buffers: state.buffers.map((buffer) => {
+          if (buffer.id !== bufferId) return buffer;
+          const offset = positionToOffset(buffer.content, line, column);
+          return {
+            ...buffer,
+            selection: { start: offset, end: offset },
+            cursor: offsetToPosition(buffer.content, offset),
+            scrollTop: Math.max(0, line * EDITOR_LINE_HEIGHT - EDITOR_LINE_HEIGHT * 5),
+          };
+        }),
       }));
     },
     setSearchQuery: (bufferId, query) => {
@@ -372,39 +410,47 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set((state) => ({
         buffers: state.buffers.map((buffer) => {
           if (buffer.id !== bufferId || buffer.undoStack.length === 0) return buffer;
-          const previousContent = buffer.undoStack[buffer.undoStack.length - 1];
-          const searchMatches = findSearchMatches(previousContent, buffer.searchQuery);
+          const previous = buffer.undoStack[buffer.undoStack.length - 1];
+          const searchMatches = findSearchMatches(previous.content, buffer.searchQuery);
           return {
             ...buffer,
-            content: previousContent,
+            content: previous.content,
             searchMatches,
             activeSearchMatchIndex: searchMatches.length > 0 ? 0 : -1,
             undoStack: buffer.undoStack.slice(0, -1),
-            redoStack: [...buffer.redoStack, buffer.content].slice(-maxUndoEntries),
-            selection: { start: 0, end: 0 },
-            cursor: { line: 0, column: 0, offset: 0 },
+            redoStack: [...buffer.redoStack, snapshotBuffer(buffer)].slice(-EDITOR_MAX_UNDO_ENTRIES),
+            selection: previous.selection,
+            cursor: previous.cursor,
+            scrollTop: previous.scrollTop,
+            scrollLeft: previous.scrollLeft,
+            lspVersion: buffer.lspVersion + 1,
           };
         }),
       }));
+      notifyBufferChanged(get, bufferId);
     },
     redo: (bufferId) => {
       set((state) => ({
         buffers: state.buffers.map((buffer) => {
           if (buffer.id !== bufferId || buffer.redoStack.length === 0) return buffer;
-          const nextContent = buffer.redoStack[buffer.redoStack.length - 1];
-          const searchMatches = findSearchMatches(nextContent, buffer.searchQuery);
+          const next = buffer.redoStack[buffer.redoStack.length - 1];
+          const searchMatches = findSearchMatches(next.content, buffer.searchQuery);
           return {
             ...buffer,
-            content: nextContent,
+            content: next.content,
             searchMatches,
             activeSearchMatchIndex: searchMatches.length > 0 ? 0 : -1,
-            undoStack: [...buffer.undoStack, buffer.content].slice(-maxUndoEntries),
+            undoStack: [...buffer.undoStack, snapshotBuffer(buffer)].slice(-EDITOR_MAX_UNDO_ENTRIES),
             redoStack: buffer.redoStack.slice(0, -1),
-            selection: { start: 0, end: 0 },
-            cursor: { line: 0, column: 0, offset: 0 },
+            selection: next.selection,
+            cursor: next.cursor,
+            scrollTop: next.scrollTop,
+            scrollLeft: next.scrollLeft,
+            lspVersion: buffer.lspVersion + 1,
           };
         }),
       }));
+      notifyBufferChanged(get, bufferId);
     },
     clearSaveStatus: () => set({ lastSaveError: null, lastSaveStatus: "idle" }),
     reconcileRenamedPath: (oldPath, newPath) => {
@@ -512,6 +558,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 }));
 
+function snapshotBuffer(buffer: EditorBuffer): UndoSnapshot {
+  return {
+    content: buffer.content,
+    selection: buffer.selection,
+    cursor: buffer.cursor,
+    scrollTop: buffer.scrollTop,
+    scrollLeft: buffer.scrollLeft,
+  };
+}
+
+function notifyBufferChanged(get: () => EditorState, bufferId: string) {
+  const buffer = get().buffers.find((candidate) => candidate.id === bufferId);
+  if (!buffer) return;
+  void notifyDocumentChange({
+    filePath: buffer.path,
+    content: buffer.content,
+    version: buffer.lspVersion,
+  }).catch((error) => console.warn("LSP document change failed", error));
+}
+
 function basename(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
@@ -549,4 +615,14 @@ export function offsetToPosition(content: string, offset: number): EditorPositio
     column: split.at(-1)?.length ?? 0,
     offset: safeOffset,
   };
+}
+
+export function positionToOffset(content: string, line: number, column: number) {
+  const lines = content.split("\n");
+  const safeLine = Math.max(0, Math.min(line, lines.length - 1));
+  let offset = 0;
+  for (let index = 0; index < safeLine; index += 1) {
+    offset += lines[index].length + 1;
+  }
+  return offset + Math.max(0, Math.min(column, lines[safeLine]?.length ?? 0));
 }

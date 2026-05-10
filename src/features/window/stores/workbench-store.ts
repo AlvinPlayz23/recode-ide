@@ -1,6 +1,14 @@
 import { create } from "zustand";
 
-export type SidebarView = "files" | "search" | "git" | "diagnostics" | "debug" | "extensions";
+export type SidebarView =
+  | "files"
+  | "search"
+  | "git"
+  | "outline"
+  | "references"
+  | "diagnostics"
+  | "debug"
+  | "extensions";
 
 interface WorkbenchState {
   activeSidebarView: SidebarView;

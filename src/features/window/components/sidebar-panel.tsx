@@ -1,6 +1,8 @@
 import { FileExplorer } from "@/features/file-explorer/components/file-explorer";
 import { SourceControlPanel } from "@/features/git/components/source-control-panel";
 import { DiagnosticsPanel } from "@/features/lsp/components/diagnostics-panel";
+import { OutlinePanel } from "@/features/outline/components/outline-panel";
+import { ReferencesPanel } from "@/features/references/components/references-panel";
 import { WorkspaceSearchPanel } from "@/features/search/components/workspace-search-panel";
 import { useWorkbenchStore } from "@/features/window/stores/workbench-store";
 
@@ -9,6 +11,8 @@ export function SidebarPanel() {
 
   if (activeSidebarView === "search") return <WorkspaceSearchPanel />;
   if (activeSidebarView === "git") return <SourceControlPanel />;
+  if (activeSidebarView === "outline") return <OutlinePanel />;
+  if (activeSidebarView === "references") return <ReferencesPanel />;
   if (activeSidebarView === "diagnostics") return <DiagnosticsPanel />;
 
   if (activeSidebarView === "debug") {

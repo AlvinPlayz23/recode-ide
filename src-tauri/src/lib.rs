@@ -58,7 +58,17 @@ pub fn run() {
             lsp_document_save,
             lsp_document_close,
             lsp_get_diagnostics,
-            lsp_get_completions
+            lsp_get_completions,
+            lsp_get_document_symbols,
+            lsp_get_hover,
+            lsp_get_definition,
+            lsp_get_references,
+            lsp_rename,
+            lsp_format_document,
+            lsp_get_signature_help,
+            lsp_get_inlay_hints,
+            lsp_get_semantic_tokens,
+            lsp_get_code_actions
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recode");

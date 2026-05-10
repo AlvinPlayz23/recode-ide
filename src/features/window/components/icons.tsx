@@ -172,6 +172,30 @@ export function ErrorIcon({ size = 12, ...rest }: IconProps) {
   );
 }
 
+export function OutlineIcon({ size = 12, ...rest }: IconProps) {
+  return (
+    <svg {...baseProps(size, rest)}>
+      <path d="M5 6h14" />
+      <path d="M5 12h10" />
+      <path d="M5 18h14" />
+      <circle cx="3" cy="6" r=".7" />
+      <circle cx="3" cy="12" r=".7" />
+      <circle cx="3" cy="18" r=".7" />
+    </svg>
+  );
+}
+
+export function ReferencesIcon({ size = 12, ...rest }: IconProps) {
+  return (
+    <svg {...baseProps(size, rest)}>
+      <circle cx="7" cy="7" r="3" />
+      <circle cx="17" cy="17" r="3" />
+      <path d="M9.2 9.2 14.8 14.8" />
+      <path d="M14 7h3a2 2 0 0 1 2 2v3" />
+    </svg>
+  );
+}
+
 export function CheckIcon({ size = 12, ...rest }: IconProps) {
   return (
     <svg {...baseProps(size, rest)}>

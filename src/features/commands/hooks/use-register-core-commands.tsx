@@ -2,7 +2,13 @@ import { useEffect } from "react";
 import { commandRegistry } from "@/features/commands/command-registry";
 import { keymapRegistry } from "@/features/commands/keymap-registry";
 import { useCommandPaletteStore } from "@/features/command-palette/stores/command-palette-store";
-import { handleSave, handleSaveAs } from "@/features/editor/services/editor-app-actions";
+import {
+  handleFindReferences,
+  handleFormatDocument,
+  handleRenameSymbol,
+  handleSave,
+  handleSaveAs,
+} from "@/features/editor/services/editor-app-actions";
 import { useEditorStore } from "@/features/editor/stores/editor-store";
 import { useProjectStore } from "@/features/project/stores/project-store";
 import { useQuickOpenStore } from "@/features/quick-open/stores/quick-open-store";
@@ -84,6 +90,39 @@ export function useRegisterCoreCommands() {
         },
       },
       {
+        id: "editor.renameSymbol",
+        title: "Rename Symbol",
+        category: "Editor",
+        detail: activeBufferId ? "Rename the symbol under the cursor" : "No active file",
+        when: () => Boolean(useEditorStore.getState().activeBufferId),
+        execute: async () => {
+          await handleRenameSymbol();
+          closePalette();
+        },
+      },
+      {
+        id: "editor.findReferences",
+        title: "Find References",
+        category: "Editor",
+        detail: activeBufferId ? "Find workspace references for the symbol under the cursor" : "No active file",
+        when: () => Boolean(useEditorStore.getState().activeBufferId),
+        execute: async () => {
+          await handleFindReferences();
+          closePalette();
+        },
+      },
+      {
+        id: "editor.formatDocument",
+        title: "Format Document",
+        category: "Editor",
+        detail: activeBufferId ? "Format the active document" : "No active file",
+        when: () => Boolean(useEditorStore.getState().activeBufferId),
+        execute: async () => {
+          await handleFormatDocument();
+          closePalette();
+        },
+      },
+      {
         id: "file.quickOpen",
         title: "Quick Open",
         category: "File",
@@ -121,6 +160,16 @@ export function useRegisterCoreCommands() {
         detail: "Open the diagnostics sidebar",
         execute: () => {
           setActiveSidebarView("diagnostics");
+          closePalette();
+        },
+      },
+      {
+        id: "workbench.showOutline",
+        title: "Show Outline",
+        category: "Workbench",
+        detail: "Open document symbols for the active file",
+        execute: () => {
+          setActiveSidebarView("outline");
           closePalette();
         },
       },
@@ -165,7 +214,11 @@ export function useRegisterCoreCommands() {
       { key: "Mod+P", command: "file.quickOpen", source: "default" },
       { key: "Mod+Shift+F", command: "workbench.showSearch", source: "default" },
       { key: "Mod+Shift+G", command: "workbench.showSourceControl", source: "default" },
+      { key: "Mod+Shift+O", command: "workbench.showOutline", source: "default" },
       { key: "Mod+Shift+M", command: "workbench.showDiagnostics", source: "default" },
+      { key: "F2", command: "editor.renameSymbol", source: "default" },
+      { key: "Shift+F12", command: "editor.findReferences", source: "default" },
+      { key: "Alt+Shift+F", command: "editor.formatDocument", source: "default" },
       { key: "Mod+S", command: "file.save", source: "default" },
       { key: "Mod+Shift+S", command: "file.saveAs", source: "default" },
       { key: "Mod+`", command: "workbench.toggleTerminal", source: "default" },

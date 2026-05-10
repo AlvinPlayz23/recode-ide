@@ -32,6 +32,7 @@ interface ProjectState {
     refreshFiles: () => Promise<void>;
     openFolder: () => Promise<void>;
     openFile: (path: string, name: string) => Promise<void>;
+    openFileAt: (path: string, name: string, line: number, column?: number) => Promise<void>;
     createFile: (parentPath: string, name: string) => Promise<string | null>;
     createFolder: (parentPath: string, name: string) => Promise<string | null>;
     renamePath: (path: string, newName: string) => Promise<string | null>;
@@ -108,6 +109,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         content: content ?? `// Unable to read ${name}\n`,
         languageId: detectLanguage(name),
       });
+    },
+    openFileAt: async (path, name, line, column = 0) => {
+      await get().actions.openFile(path, name);
+      const buffer = useEditorStore.getState().buffers.find((buffer) => buffer.path === path);
+      if (buffer) {
+        useEditorStore.getState().actions.revealPosition(buffer.id, line, column);
+      }
     },
     createFile: async (parentPath, name) => {
       const path = await createFile(parentPath, name);

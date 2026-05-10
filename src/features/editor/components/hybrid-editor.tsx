@@ -1,40 +1,68 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  EDITOR_CHAR_WIDTH,
+  EDITOR_GUTTER_WIDTH,
+  EDITOR_LINE_HEIGHT,
+  EDITOR_OVERSCAN_LINES,
+  isLargeEditorBuffer,
+} from "@/features/editor/config/editor-constants";
 import type { EditorBuffer } from "@/features/editor/stores/editor-store";
 import { offsetToPosition, useEditorStore } from "@/features/editor/stores/editor-store";
 import type { HighlightToken } from "@/features/editor/utils/tokenize-line";
 import { tokenizeLine } from "@/features/editor/utils/tokenize-line";
 import { tokenizeInWorker } from "@/features/editor/workers/tokenizer-client";
 import { CompletionDropdown } from "@/features/lsp/components/completion-dropdown";
-import { getCompletions, getDiagnostics, type RecodeCompletionItem } from "@/features/lsp/services/lsp-service";
+import {
+  getCompletions,
+  getDefinition,
+  getDiagnostics,
+  getHover,
+  getInlayHints,
+  getSemanticTokens,
+  type RecodeCompletionItem,
+  type RecodeHover,
+  type RecodeInlayHint,
+  type RecodeSemanticToken,
+} from "@/features/lsp/services/lsp-service";
 import { useDiagnosticsStore } from "@/features/lsp/stores/diagnostics-store";
+import { useProjectStore } from "@/features/project/stores/project-store";
 import { FileIcon } from "@/features/window/components/icons";
 
 interface HybridEditorProps {
   buffer: EditorBuffer | null;
 }
 
-const lineHeight = 22;
-const overscan = 12;
 const emptyDiagnostics: ReturnType<typeof useDiagnosticsStore.getState>["diagnosticsByFile"][string] = [];
 
 export function HybridEditor({ buffer }: HybridEditorProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+  const hoverRequestRef = useRef(0);
   const updateBufferContent = useEditorStore((state) => state.actions.updateBufferContent);
   const undo = useEditorStore((state) => state.actions.undo);
   const redo = useEditorStore((state) => state.actions.redo);
   const setCursor = useEditorStore((state) => state.actions.setCursor);
   const setSelection = useEditorStore((state) => state.actions.setSelection);
-  const setScrollTop = useEditorStore((state) => state.actions.setScrollTop);
+  const setScrollPosition = useEditorStore((state) => state.actions.setScrollPosition);
   const setSearchQuery = useEditorStore((state) => state.actions.setSearchQuery);
   const goToSearchMatch = useEditorStore((state) => state.actions.goToSearchMatch);
+  const revealPosition = useEditorStore((state) => state.actions.revealPosition);
+  const openFileAt = useProjectStore((state) => state.actions.openFileAt);
   const [viewportHeight, setViewportHeight] = useState(600);
   const [isFindVisible, setIsFindVisible] = useState(false);
   const [tokenizedLines, setTokenizedLines] = useState<HighlightToken[][]>([]);
   const [completionItems, setCompletionItems] = useState<RecodeCompletionItem[]>([]);
   const [isCompletionDropdownVisible, setIsCompletionDropdownVisible] = useState(false);
   const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(0);
+  const [hoverInfo, setHoverInfo] = useState<{
+    hover: RecodeHover;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [inlayHints, setInlayHints] = useState<RecodeInlayHint[]>([]);
+  const [semanticTokens, setSemanticTokens] = useState<RecodeSemanticToken[]>([]);
   const setDiagnostics = useDiagnosticsStore((state) => state.actions.setDiagnostics);
   const diagnostics = useDiagnosticsStore(
     (state) => (buffer ? (state.diagnosticsByFile[buffer.path] ?? emptyDiagnostics) : emptyDiagnostics),
@@ -43,13 +71,15 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const lines = useMemo(() => (buffer?.content ?? "").split("\n"), [buffer?.content]);
   const lineStarts = useMemo(() => buildLineStarts(buffer?.content ?? ""), [buffer?.content]);
   const scrollTop = buffer?.scrollTop ?? 0;
-  const startLine = Math.max(0, Math.floor(scrollTop / lineHeight) - overscan);
-  const visibleCount = Math.ceil(viewportHeight / lineHeight) + overscan * 2;
+  const scrollLeft = buffer?.scrollLeft ?? 0;
+  const isLargeBuffer = buffer ? isLargeEditorBuffer(buffer.content, lines.length) : false;
+  const startLine = Math.max(0, Math.floor(scrollTop / EDITOR_LINE_HEIGHT) - EDITOR_OVERSCAN_LINES);
+  const visibleCount = Math.ceil(viewportHeight / EDITOR_LINE_HEIGHT) + EDITOR_OVERSCAN_LINES * 2;
   const endLine = Math.min(lines.length, startLine + visibleCount);
   const visibleLines = lines.slice(startLine, endLine);
   const selectionRects = useMemo(
-    () => (buffer ? buildSelectionRects(buffer, lineStarts, startLine, endLine) : []),
-    [buffer, endLine, lineStarts, startLine],
+    () => (buffer ? buildSelectionRects(buffer, lineStarts, startLine, endLine, scrollLeft) : []),
+    [buffer, endLine, lineStarts, scrollLeft, startLine],
   );
   const diagnosticsByLine = useMemo(() => {
     const map = new Map<number, "error" | "warning" | "info">();
@@ -62,6 +92,13 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     }
     return map;
   }, [diagnostics]);
+  const semanticTokensByLine = useMemo(() => {
+    const map = new Map<number, RecodeSemanticToken[]>();
+    for (const token of semanticTokens) {
+      map.set(token.line, [...(map.get(token.line) ?? []), token]);
+    }
+    return map;
+  }, [semanticTokens]);
   const ghostCompletion = useMemo(() => {
     if (!buffer || completionItems.length === 0) return null;
     const prefix = currentWordPrefix(buffer.content, buffer.selection.end);
@@ -89,13 +126,26 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     if (!inputRef.current || !buffer) return;
     inputRef.current.value = buffer.content;
     inputRef.current.scrollTop = buffer.scrollTop;
+    inputRef.current.scrollLeft = buffer.scrollLeft;
     inputRef.current.selectionStart = buffer.selection.start;
     inputRef.current.selectionEnd = buffer.selection.end;
     inputRef.current.focus();
   }, [buffer?.id]);
 
   useEffect(() => {
-    if (!buffer) {
+    const input = inputRef.current;
+    if (!input || !buffer) return;
+    if (input.value !== buffer.content) {
+      input.value = buffer.content;
+    }
+    input.selectionStart = Math.min(buffer.selection.start, buffer.content.length);
+    input.selectionEnd = Math.min(buffer.selection.end, buffer.content.length);
+    input.scrollTop = buffer.scrollTop;
+    input.scrollLeft = buffer.scrollLeft;
+  }, [buffer?.content, buffer?.cursor.offset, buffer?.scrollLeft, buffer?.scrollTop, buffer?.selection.end, buffer?.selection.start]);
+
+  useEffect(() => {
+    if (!buffer || isLargeBuffer) {
       setTokenizedLines([]);
       return;
     }
@@ -107,7 +157,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [buffer?.content, buffer?.languageId]);
+  }, [buffer?.content, buffer?.languageId, isLargeBuffer]);
 
   useEffect(() => {
     if (!inputRef.current || !buffer) return;
@@ -118,7 +168,10 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   }, [buffer?.activeSearchMatchIndex]);
 
   useEffect(() => {
-    if (!buffer) return;
+    if (!buffer || isLargeBuffer) {
+      if (buffer) setDiagnostics(buffer.path, []);
+      return;
+    }
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void getDiagnostics({
@@ -134,10 +187,14 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [buffer?.content, buffer?.languageId, buffer?.path, setDiagnostics]);
+  }, [buffer?.content, buffer?.languageId, buffer?.path, isLargeBuffer, setDiagnostics]);
 
   useEffect(() => {
-    if (!buffer) return;
+    if (!buffer || isLargeBuffer) {
+      setCompletionItems([]);
+      setIsCompletionDropdownVisible(false);
+      return;
+    }
     const prefix = currentWordPrefix(buffer.content, buffer.selection.end);
     if (prefix.length < 2) {
       setCompletionItems([]);
@@ -156,7 +213,56 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [buffer?.content, buffer?.languageId, buffer?.selection.end]);
+  }, [buffer?.content, buffer?.languageId, buffer?.selection.end, isLargeBuffer]);
+
+  useEffect(() => {
+    if (!buffer || isLargeBuffer) {
+      setInlayHints([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void getInlayHints({
+        filePath: buffer.path,
+        content: buffer.content,
+        languageId: buffer.languageId,
+        startLine,
+        endLine,
+      }).then((hints) => {
+        if (!cancelled) setInlayHints(hints);
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [buffer?.content, buffer?.languageId, buffer?.path, endLine, isLargeBuffer, startLine]);
+
+  useEffect(() => {
+    if (!buffer || isLargeBuffer) {
+      setSemanticTokens([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void getSemanticTokens({
+        filePath: buffer.path,
+        content: buffer.content,
+        languageId: buffer.languageId,
+      }).then((tokens) => {
+        if (!cancelled) setSemanticTokens(tokens);
+      });
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [buffer?.content, buffer?.languageId, buffer?.path, isLargeBuffer]);
+
+  useEffect(() => {
+    setHoverInfo(null);
+    hoverRequestRef.current += 1;
+  }, [buffer?.id]);
 
   if (!buffer) {
     return (
@@ -197,6 +303,95 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     setCursor(buffer.id, offsetToPosition(input.value, input.selectionEnd));
   };
 
+  const resolvePointerPosition = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+    const input = inputRef.current;
+    if (!input) return null;
+    const rect = input.getBoundingClientRect();
+    const line = Math.max(
+      0,
+      Math.floor((event.clientY - rect.top + input.scrollTop) / EDITOR_LINE_HEIGHT),
+    );
+    const column = Math.max(
+      0,
+      Math.floor((event.clientX - rect.left - EDITOR_GUTTER_WIDTH + input.scrollLeft) / EDITOR_CHAR_WIDTH),
+    );
+    return { line, column };
+  };
+
+  const handleEditorMouseMove = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+    if (!buffer) return;
+    if (event.ctrlKey || event.metaKey) return;
+    const position = resolvePointerPosition(event);
+    if (!position) return;
+
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+    }
+    const requestId = ++hoverRequestRef.current;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+
+    hoverTimerRef.current = window.setTimeout(() => {
+      void getHover({
+        filePath: buffer.path,
+        content: buffer.content,
+        languageId: buffer.languageId,
+        line: position.line,
+        character: position.column,
+      })
+        .then((hover) => {
+          if (!hover || requestId !== hoverRequestRef.current) return;
+          setHoverInfo({
+            hover,
+            top: Math.min(window.innerHeight - 120, clientY + 16),
+            left: Math.min(window.innerWidth - 340, clientX + 12),
+          });
+        })
+        .catch(() => {
+          if (requestId === hoverRequestRef.current) setHoverInfo(null);
+        });
+    }, 420);
+  };
+
+  const handleEditorMouseLeave = () => {
+    hoverRequestRef.current += 1;
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoverInfo(null);
+  };
+
+  const handleEditorClick = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+    if (!event.ctrlKey && !event.metaKey) {
+      handleSelectionChange();
+      return;
+    }
+
+    event.preventDefault();
+    const position = resolvePointerPosition(event);
+    if (!position) return;
+
+    void getDefinition({
+      filePath: buffer.path,
+      content: buffer.content,
+      languageId: buffer.languageId,
+      line: position.line,
+      character: position.column,
+    }).then((locations) => {
+      const location = locations[0];
+      if (!location) return;
+      const targetPath = fileUriToPath(location.uri);
+      const targetName = targetPath.split(/[\\/]/).filter(Boolean).at(-1) ?? targetPath;
+      if (targetPath === buffer.path) {
+        revealPosition(buffer.id, location.range.start.line, location.range.start.character);
+        requestAnimationFrame(() => inputRef.current?.focus());
+        return;
+      }
+      void openFileAt(targetPath, targetName, location.range.start.line, location.range.start.character);
+    });
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isCompletionDropdownVisible && completionItems.length > 0) {
       if (event.key === "ArrowDown") {
@@ -224,6 +419,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
 
     if ((event.ctrlKey || event.metaKey) && event.key === " ") {
       event.preventDefault();
+      if (isLargeBuffer) return;
       void requestCompletions({ showDropdown: true });
       return;
     }
@@ -325,6 +521,11 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
 
   return (
     <section className="hybrid-editor" ref={viewportRef}>
+      {isLargeBuffer ? (
+        <div className="large-file-banner">
+          Large file mode: expensive diagnostics, semantic overlays, inlay hints, and automatic completions are paused.
+        </div>
+      ) : null}
       {isFindVisible ? (
         <div className="find-bar">
           <input
@@ -355,24 +556,30 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
       ) : null}
       <div
         className="editor-render-layer"
-        style={{ height: lines.length * lineHeight, transform: `translateY(${-scrollTop}px)` }}
+        style={
+          {
+            "--editor-scroll-left": `${scrollLeft}px`,
+            height: lines.length * EDITOR_LINE_HEIGHT,
+            transform: `translateY(${-scrollTop}px)`,
+          } as React.CSSProperties
+        }
         aria-hidden="true"
       >
-        <div className="selection-layer" style={{ transform: `translateY(${startLine * lineHeight}px)` }}>
+        <div className="selection-layer" style={{ transform: `translateY(${startLine * EDITOR_LINE_HEIGHT}px)` }}>
           {selectionRects.map((rect) => (
             <span
               className="selection-rect"
               key={`${rect.line}-${rect.left}-${rect.width}`}
               style={{
-                top: rect.line * lineHeight,
+                top: rect.line * EDITOR_LINE_HEIGHT,
                 left: rect.left,
                 width: rect.width,
-                height: lineHeight,
+                height: EDITOR_LINE_HEIGHT,
               }}
             />
           ))}
         </div>
-        <div style={{ transform: `translateY(${startLine * lineHeight}px)` }}>
+        <div style={{ transform: `translateY(${startLine * EDITOR_LINE_HEIGHT}px)` }}>
           {visibleLines.map((line, index) => {
             const lineNumber = startLine + index + 1;
             const absoluteLineIndex = startLine + index;
@@ -381,7 +588,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
               <div
                 className={`editor-line ${diagnosticSeverity ? `diagnostic-${diagnosticSeverity}` : ""}`}
                 key={`${buffer.id}:${lineNumber}`}
-                style={{ height: lineHeight }}
+                style={{ height: EDITOR_LINE_HEIGHT }}
                 title={diagnostics.find((diagnostic) => diagnostic.range.start.line === absoluteLineIndex)?.message}
               >
                 <span className="line-number">{lineNumber}</span>
@@ -391,6 +598,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
                     lineStarts[absoluteLineIndex] ?? 0,
                     buffer,
                     tokenizedLines[absoluteLineIndex],
+                    semanticTokensByLine.get(absoluteLineIndex),
                   )}
                 </code>
               </div>
@@ -398,17 +606,40 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
           })}
         </div>
       </div>
+      <div className="inlay-hints-layer" aria-hidden="true">
+        {inlayHints.map((hint, index) => (
+          <span
+            className="inlay-hint"
+            key={`${hint.line}:${hint.character}:${hint.label}:${index}`}
+            style={{
+              top: hint.line * EDITOR_LINE_HEIGHT - scrollTop,
+              left: EDITOR_GUTTER_WIDTH + hint.character * EDITOR_CHAR_WIDTH - scrollLeft,
+            }}
+          >
+            {hint.label}
+          </span>
+        ))}
+      </div>
       {ghostCompletion ? (
         <span
           className="ghost-completion"
           style={{
-            top: (buffer.cursor.line + 1) * lineHeight - scrollTop - lineHeight,
-            left: 48 + buffer.cursor.column * 7.83,
+            top: (buffer.cursor.line + 1) * EDITOR_LINE_HEIGHT - scrollTop - EDITOR_LINE_HEIGHT,
+            left: EDITOR_GUTTER_WIDTH + buffer.cursor.column * EDITOR_CHAR_WIDTH - scrollLeft,
           }}
           aria-hidden="true"
         >
           {ghostCompletion.text}
         </span>
+      ) : null}
+      {hoverInfo ? (
+        <div
+          className="editor-hover-tooltip"
+          style={{ top: hoverInfo.top, left: hoverInfo.left }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {hoverInfo.hover.contents}
+        </div>
       ) : null}
       <textarea
         ref={inputRef}
@@ -421,11 +652,15 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
         wrap="off"
         aria-label={`Editing ${buffer.name}`}
         onChange={(event) => handleInput(event.currentTarget.value)}
-        onClick={handleSelectionChange}
+        onClick={handleEditorClick}
         onKeyUp={handleSelectionChange}
         onKeyDown={handleKeyDown}
         onSelect={handleSelectionChange}
-        onScroll={(event) => setScrollTop(buffer.id, event.currentTarget.scrollTop)}
+        onMouseMove={handleEditorMouseMove}
+        onMouseLeave={handleEditorMouseLeave}
+        onScroll={(event) =>
+          setScrollPosition(buffer.id, event.currentTarget.scrollTop, event.currentTarget.scrollLeft)
+        }
       />
       <CompletionDropdown
         items={isCompletionDropdownVisible ? completionItems : []}
@@ -453,6 +688,7 @@ function renderLineWithSearch(
   lineStart: number,
   buffer: EditorBuffer,
   precomputedTokens?: HighlightToken[],
+  semanticTokens?: RecodeSemanticToken[],
 ) {
   const lineEnd = lineStart + line.length;
   const matches = buffer.searchMatches.filter(
@@ -460,6 +696,9 @@ function renderLineWithSearch(
   );
 
   if (matches.length === 0) {
+    if (semanticTokens && semanticTokens.length > 0) {
+      return renderSemanticLine(line, buffer.languageId, semanticTokens);
+    }
     return (precomputedTokens ?? tokenizeLine(line, buffer.languageId)).map((token, tokenIndex) => (
       <span className={`tok ${token.kind}`} key={`${token.value}:${tokenIndex}`}>
         {token.value || " "}
@@ -496,20 +735,43 @@ function renderLineWithSearch(
   return parts;
 }
 
+function renderSemanticLine(line: string, languageId: string, semanticTokens: RecodeSemanticToken[]) {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  const sorted = [...semanticTokens].sort((a, b) => a.startChar - b.startChar);
+
+  sorted.forEach((semanticToken, index) => {
+    const start = Math.max(0, Math.min(semanticToken.startChar, line.length));
+    const end = Math.max(start, Math.min(start + semanticToken.length, line.length));
+    if (start > cursor) {
+      parts.push(renderTokenizedSegment(line.slice(cursor, start), languageId, `semantic-plain-${cursor}`));
+    }
+    parts.push(
+      <span className={`sem ${semanticToken.tokenType}`} key={`semantic-${start}-${index}`}>
+        {line.slice(start, end)}
+      </span>,
+    );
+    cursor = end;
+  });
+
+  if (cursor < line.length) {
+    parts.push(renderTokenizedSegment(line.slice(cursor), languageId, `semantic-tail-${cursor}`));
+  }
+  return parts;
+}
+
 function buildSelectionRects(
   buffer: EditorBuffer,
   lineStarts: number[],
   startLine: number,
   endLine: number,
+  scrollLeft: number,
 ) {
   const start = Math.min(buffer.selection.start, buffer.selection.end);
   const end = Math.max(buffer.selection.start, buffer.selection.end);
   if (start === end) return [];
 
   const rects: Array<{ line: number; left: number; width: number }> = [];
-  const charWidth = 7.83;
-  const gutterWidth = 48;
-
   for (let line = startLine; line < endLine; line += 1) {
     const lineStart = lineStarts[line] ?? 0;
     const lineEnd = lineStarts[line + 1] ? lineStarts[line + 1] - 1 : buffer.content.length;
@@ -519,8 +781,11 @@ function buildSelectionRects(
     const selectionEndColumn = Math.max(selectionStartColumn, Math.min(lineEnd, end) - lineStart);
     rects.push({
       line: line - startLine,
-      left: gutterWidth + selectionStartColumn * charWidth,
-      width: Math.max(charWidth, (selectionEndColumn - selectionStartColumn) * charWidth),
+      left: EDITOR_GUTTER_WIDTH + selectionStartColumn * EDITOR_CHAR_WIDTH - scrollLeft,
+      width: Math.max(
+        EDITOR_CHAR_WIDTH,
+        (selectionEndColumn - selectionStartColumn) * EDITOR_CHAR_WIDTH,
+      ),
     });
   }
 
@@ -529,12 +794,12 @@ function buildSelectionRects(
 
 function scrollSelectionIntoView(input: HTMLTextAreaElement, buffer: EditorBuffer) {
   const line = offsetToPosition(buffer.content, buffer.selection.end).line;
-  const targetTop = line * lineHeight;
-  const targetBottom = targetTop + lineHeight;
+  const targetTop = line * EDITOR_LINE_HEIGHT;
+  const targetBottom = targetTop + EDITOR_LINE_HEIGHT;
   if (targetTop < input.scrollTop) {
-    input.scrollTop = Math.max(0, targetTop - lineHeight * 3);
+    input.scrollTop = Math.max(0, targetTop - EDITOR_LINE_HEIGHT * 3);
   } else if (targetBottom > input.scrollTop + input.clientHeight) {
-    input.scrollTop = targetBottom - input.clientHeight + lineHeight * 3;
+    input.scrollTop = targetBottom - input.clientHeight + EDITOR_LINE_HEIGHT * 3;
   }
 }
 
@@ -557,4 +822,11 @@ function findWordStart(content: string, offset: number) {
 function currentWordPrefix(content: string, offset: number) {
   const start = findWordStart(content, offset);
   return content.slice(start, offset);
+}
+
+function fileUriToPath(uri: string) {
+  const withoutScheme = uri.replace(/^file:\/\/\/?/, "");
+  const decoded = decodeURIComponent(withoutScheme);
+  if (/^[A-Za-z]:\//.test(decoded)) return decoded.replaceAll("/", "\\");
+  return decoded;
 }
