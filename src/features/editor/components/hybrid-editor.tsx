@@ -1,7 +1,10 @@
+import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EditorBuffer } from "@/features/editor/stores/editor-store";
-import { useEditorStore } from "@/features/editor/stores/editor-store";
+import { offsetToPosition, useEditorStore } from "@/features/editor/stores/editor-store";
+import type { HighlightToken } from "@/features/editor/utils/tokenize-line";
 import { tokenizeLine } from "@/features/editor/utils/tokenize-line";
+import { tokenizeInWorker } from "@/features/editor/workers/tokenizer-client";
 import { FileIcon } from "@/features/window/components/icons";
 
 interface HybridEditorProps {
@@ -15,16 +18,29 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const updateBufferContent = useEditorStore((state) => state.actions.updateBufferContent);
+  const saveBuffer = useEditorStore((state) => state.actions.saveBuffer);
+  const undo = useEditorStore((state) => state.actions.undo);
+  const redo = useEditorStore((state) => state.actions.redo);
   const setCursor = useEditorStore((state) => state.actions.setCursor);
+  const setSelection = useEditorStore((state) => state.actions.setSelection);
   const setScrollTop = useEditorStore((state) => state.actions.setScrollTop);
+  const setSearchQuery = useEditorStore((state) => state.actions.setSearchQuery);
+  const goToSearchMatch = useEditorStore((state) => state.actions.goToSearchMatch);
   const [viewportHeight, setViewportHeight] = useState(600);
+  const [isFindVisible, setIsFindVisible] = useState(false);
+  const [tokenizedLines, setTokenizedLines] = useState<HighlightToken[][]>([]);
 
   const lines = useMemo(() => (buffer?.content ?? "").split("\n"), [buffer?.content]);
+  const lineStarts = useMemo(() => buildLineStarts(buffer?.content ?? ""), [buffer?.content]);
   const scrollTop = buffer?.scrollTop ?? 0;
   const startLine = Math.max(0, Math.floor(scrollTop / lineHeight) - overscan);
   const visibleCount = Math.ceil(viewportHeight / lineHeight) + overscan * 2;
   const endLine = Math.min(lines.length, startLine + visibleCount);
   const visibleLines = lines.slice(startLine, endLine);
+  const selectionRects = useMemo(
+    () => (buffer ? buildSelectionRects(buffer, lineStarts, startLine, endLine) : []),
+    [buffer, endLine, lineStarts, startLine],
+  );
 
   useEffect(() => {
     if (!viewportRef.current) return;
@@ -39,7 +55,33 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     if (!inputRef.current || !buffer) return;
     inputRef.current.value = buffer.content;
     inputRef.current.scrollTop = buffer.scrollTop;
+    inputRef.current.selectionStart = buffer.selection.start;
+    inputRef.current.selectionEnd = buffer.selection.end;
+    inputRef.current.focus();
   }, [buffer?.id]);
+
+  useEffect(() => {
+    if (!buffer) {
+      setTokenizedLines([]);
+      return;
+    }
+
+    let cancelled = false;
+    void tokenizeInWorker(buffer.content, buffer.languageId).then((nextTokens) => {
+      if (!cancelled) setTokenizedLines(nextTokens);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [buffer?.content, buffer?.languageId]);
+
+  useEffect(() => {
+    if (!inputRef.current || !buffer) return;
+    if (document.activeElement !== inputRef.current) return;
+    inputRef.current.selectionStart = buffer.selection.start;
+    inputRef.current.selectionEnd = buffer.selection.end;
+    scrollSelectionIntoView(inputRef.current, buffer);
+  }, [buffer?.activeSearchMatchIndex]);
 
   if (!buffer) {
     return (
@@ -58,40 +100,143 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
 
   const handleInput = (content: string) => {
     updateBufferContent(buffer.id, content);
+    const input = inputRef.current;
+    if (!input) return;
+    setSelection(buffer.id, {
+      start: input.selectionStart,
+      end: input.selectionEnd,
+    });
+    setCursor(buffer.id, offsetToPosition(content, input.selectionEnd));
   };
 
   const handleSelectionChange = () => {
     const input = inputRef.current;
     if (!input) return;
-    const offset = input.selectionStart;
-    const beforeCursor = input.value.slice(0, offset);
-    const split = beforeCursor.split("\n");
-    setCursor(buffer.id, {
-      line: split.length - 1,
-      column: split.at(-1)?.length ?? 0,
-      offset,
+    setSelection(buffer.id, {
+      start: input.selectionStart,
+      end: input.selectionEnd,
     });
+    setCursor(buffer.id, offsetToPosition(input.value, input.selectionEnd));
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveBuffer(buffer.id);
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+      event.preventDefault();
+      undo(buffer.id);
+      return;
+    }
+
+    if (
+      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") ||
+      ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z")
+    ) {
+      event.preventDefault();
+      redo(buffer.id);
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      setIsFindVisible(true);
+      return;
+    }
+
+    if (event.key === "Escape" && isFindVisible) {
+      event.preventDefault();
+      setIsFindVisible(false);
+      return;
+    }
+
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const input = inputRef.current;
+      if (!input) return;
+
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const value = input.value;
+      const replacement = "  ";
+      const nextValue = value.slice(0, start) + replacement + value.slice(end);
+      const nextOffset = start + replacement.length;
+
+      input.value = nextValue;
+      input.selectionStart = nextOffset;
+      input.selectionEnd = nextOffset;
+      updateBufferContent(buffer.id, nextValue);
+      setSelection(buffer.id, { start: nextOffset, end: nextOffset });
+      setCursor(buffer.id, offsetToPosition(nextValue, nextOffset));
+    }
   };
 
   return (
     <section className="hybrid-editor" ref={viewportRef}>
+      {isFindVisible ? (
+        <div className="find-bar">
+          <input
+            autoFocus
+            value={buffer.searchQuery}
+            onChange={(event) => setSearchQuery(buffer.id, event.currentTarget.value)}
+            placeholder="Find in file"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                goToSearchMatch(buffer.id, event.shiftKey ? -1 : 1);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsFindVisible(false);
+              }
+            }}
+          />
+          <span>
+            {buffer.searchMatches.length === 0
+              ? "No results"
+              : `${buffer.activeSearchMatchIndex + 1}/${buffer.searchMatches.length}`}
+          </span>
+          <button type="button" onClick={() => goToSearchMatch(buffer.id, -1)}>Prev</button>
+          <button type="button" onClick={() => goToSearchMatch(buffer.id, 1)}>Next</button>
+          <button type="button" onClick={() => setIsFindVisible(false)}>Close</button>
+        </div>
+      ) : null}
       <div
         className="editor-render-layer"
         style={{ height: lines.length * lineHeight, transform: `translateY(${-scrollTop}px)` }}
         aria-hidden="true"
       >
+        <div className="selection-layer" style={{ transform: `translateY(${startLine * lineHeight}px)` }}>
+          {selectionRects.map((rect) => (
+            <span
+              className="selection-rect"
+              key={`${rect.line}-${rect.left}-${rect.width}`}
+              style={{
+                top: rect.line * lineHeight,
+                left: rect.left,
+                width: rect.width,
+                height: lineHeight,
+              }}
+            />
+          ))}
+        </div>
         <div style={{ transform: `translateY(${startLine * lineHeight}px)` }}>
           {visibleLines.map((line, index) => {
             const lineNumber = startLine + index + 1;
+            const absoluteLineIndex = startLine + index;
             return (
               <div className="editor-line" key={`${buffer.id}:${lineNumber}`} style={{ height: lineHeight }}>
                 <span className="line-number">{lineNumber}</span>
                 <code>
-                  {tokenizeLine(line, buffer.languageId).map((token, tokenIndex) => (
-                    <span className={`tok ${token.kind}`} key={`${token.value}:${tokenIndex}`}>
-                      {token.value || " "}
-                    </span>
-                  ))}
+                  {renderLineWithSearch(
+                    line,
+                    lineStarts[absoluteLineIndex] ?? 0,
+                    buffer,
+                    tokenizedLines[absoluteLineIndex],
+                  )}
                 </code>
               </div>
             );
@@ -106,13 +251,121 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"
+        wrap="off"
         aria-label={`Editing ${buffer.name}`}
         onChange={(event) => handleInput(event.currentTarget.value)}
         onClick={handleSelectionChange}
         onKeyUp={handleSelectionChange}
+        onKeyDown={handleKeyDown}
         onSelect={handleSelectionChange}
         onScroll={(event) => setScrollTop(buffer.id, event.currentTarget.scrollTop)}
       />
     </section>
   );
+}
+
+function buildLineStarts(content: string) {
+  const starts = [0];
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] === "\n") starts.push(index + 1);
+  }
+  return starts;
+}
+
+function renderLineWithSearch(
+  line: string,
+  lineStart: number,
+  buffer: EditorBuffer,
+  precomputedTokens?: HighlightToken[],
+) {
+  const lineEnd = lineStart + line.length;
+  const matches = buffer.searchMatches.filter(
+    (match) => match.end > lineStart && match.start <= lineEnd,
+  );
+
+  if (matches.length === 0) {
+    return (precomputedTokens ?? tokenizeLine(line, buffer.languageId)).map((token, tokenIndex) => (
+      <span className={`tok ${token.kind}`} key={`${token.value}:${tokenIndex}`}>
+        {token.value || " "}
+      </span>
+    ));
+  }
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+
+  matches.forEach((match) => {
+    const start = Math.max(0, match.start - lineStart);
+    const end = Math.min(line.length, match.end - lineStart);
+    if (start > cursor) {
+      parts.push(renderTokenizedSegment(line.slice(cursor, start), buffer.languageId, `plain-${cursor}`));
+    }
+    parts.push(
+      <mark
+        className={`search-hit ${
+          buffer.searchMatches[buffer.activeSearchMatchIndex] === match ? "active" : ""
+        }`}
+        key={`match-${match.start}`}
+      >
+        {line.slice(start, end)}
+      </mark>,
+    );
+    cursor = end;
+  });
+
+  if (cursor < line.length) {
+    parts.push(renderTokenizedSegment(line.slice(cursor), buffer.languageId, `plain-${cursor}`));
+  }
+
+  return parts;
+}
+
+function buildSelectionRects(
+  buffer: EditorBuffer,
+  lineStarts: number[],
+  startLine: number,
+  endLine: number,
+) {
+  const start = Math.min(buffer.selection.start, buffer.selection.end);
+  const end = Math.max(buffer.selection.start, buffer.selection.end);
+  if (start === end) return [];
+
+  const rects: Array<{ line: number; left: number; width: number }> = [];
+  const charWidth = 7.83;
+  const gutterWidth = 48;
+
+  for (let line = startLine; line < endLine; line += 1) {
+    const lineStart = lineStarts[line] ?? 0;
+    const lineEnd = lineStarts[line + 1] ? lineStarts[line + 1] - 1 : buffer.content.length;
+    if (end < lineStart || start > lineEnd) continue;
+
+    const selectionStartColumn = Math.max(0, start - lineStart);
+    const selectionEndColumn = Math.max(selectionStartColumn, Math.min(lineEnd, end) - lineStart);
+    rects.push({
+      line: line - startLine,
+      left: gutterWidth + selectionStartColumn * charWidth,
+      width: Math.max(charWidth, (selectionEndColumn - selectionStartColumn) * charWidth),
+    });
+  }
+
+  return rects;
+}
+
+function scrollSelectionIntoView(input: HTMLTextAreaElement, buffer: EditorBuffer) {
+  const line = offsetToPosition(buffer.content, buffer.selection.end).line;
+  const targetTop = line * lineHeight;
+  const targetBottom = targetTop + lineHeight;
+  if (targetTop < input.scrollTop) {
+    input.scrollTop = Math.max(0, targetTop - lineHeight * 3);
+  } else if (targetBottom > input.scrollTop + input.clientHeight) {
+    input.scrollTop = targetBottom - input.clientHeight + lineHeight * 3;
+  }
+}
+
+function renderTokenizedSegment(segment: string, languageId: string, keyPrefix: string) {
+  return tokenizeLine(segment, languageId).map((token, tokenIndex) => (
+    <span className={`tok ${token.kind}`} key={`${keyPrefix}-${token.value}-${tokenIndex}`}>
+      {token.value || " "}
+    </span>
+  ));
 }

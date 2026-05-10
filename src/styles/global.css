@@ -446,6 +446,19 @@ kbd {
   border-radius: 0;
 }
 
+.file-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
 .file-row:hover {
   background: var(--hover-strong);
   color: var(--text);
@@ -454,6 +467,24 @@ kbd {
 .file-row.active {
   background: var(--selected);
   color: var(--text);
+}
+
+.file-row.editing {
+  gap: 6px;
+  background: var(--hover);
+}
+
+.file-row.editing input {
+  min-width: 0;
+  flex: 1;
+  height: 20px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--primary-bg);
+  color: var(--text);
+  padding: 0 6px;
+  font: inherit;
 }
 
 .file-row .file-chevron {
@@ -484,6 +515,45 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding-right: 2px;
+}
+
+.file-row:hover .file-actions,
+.file-row:focus-within .file-actions {
+  display: inline-flex;
+}
+
+.file-actions button {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-lighter);
+  font: 10px / 1 var(--font-sans);
+}
+
+.file-actions button:hover {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+.explorer-error {
+  margin: 4px 8px;
+  border-left: 2px solid var(--error);
+  color: var(--error);
+  padding: 3px 7px;
+  font-size: var(--ui-text-xs);
+  line-height: 1.4;
 }
 
 .empty-row {
@@ -633,24 +703,92 @@ kbd {
     linear-gradient(90deg, var(--editor-gutter) 0 1px, transparent 1px 100%) 51px 0 / 1px 100% no-repeat,
     var(--editor-bg);
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
 }
 
 .editor-render-layer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
   white-space: pre;
+}
+
+.selection-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.selection-rect {
+  position: absolute;
+  display: block;
+  border-radius: 2px;
+  background: rgba(96, 165, 250, 0.22);
+}
+
+.find-bar {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--tertiary-bg);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+}
+
+.find-bar input {
+  width: 190px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--primary-bg);
+  color: var(--text);
+  padding: 0 8px;
+  font-family: var(--font-sans);
+  font-size: var(--ui-text-sm);
+}
+
+.find-bar span {
+  min-width: 54px;
+  color: var(--text-lighter);
+  font-family: var(--font-sans);
+  font-size: var(--ui-text-xs);
+  text-align: center;
+}
+
+.find-bar button {
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-light);
+  padding: 0 7px;
+  font-size: var(--ui-text-xs);
+}
+
+.find-bar button:hover {
+  background: var(--hover-strong);
+  color: var(--text);
 }
 
 .editor-line {
   display: grid;
   grid-template-columns: 48px 1fr;
-  align-items: center;
+  align-items: start;
   font-size: 13px;
   line-height: 22px;
+  font-variant-ligatures: none;
 }
 
 .line-number {
+  line-height: 22px;
   padding-right: 12px;
   color: var(--text-faint);
   text-align: right;
@@ -659,6 +797,10 @@ kbd {
 
 .editor-line code {
   color: #d8dee9;
+  display: block;
+  min-width: max-content;
+  line-height: 22px;
+  tab-size: 2;
 }
 
 .tok.keyword {
@@ -675,6 +817,17 @@ kbd {
   color: #ffaf75;
 }
 
+.search-hit {
+  border-radius: 2px;
+  background: rgba(240, 180, 65, 0.26);
+  color: inherit;
+}
+
+.search-hit.active {
+  background: rgba(106, 169, 255, 0.36);
+  outline: 1px solid rgba(106, 169, 255, 0.5);
+}
+
 .editor-input-layer {
   position: absolute;
   inset: 0;
@@ -682,13 +835,18 @@ kbd {
   border: 0;
   outline: 0;
   overflow: auto;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  overflow-y: auto;
   padding: 0 0 0 48px;
   background: transparent;
   color: transparent;
   caret-color: #ffffff;
   font: 13px / 22px var(--font-mono);
+  font-variant-ligatures: none;
   tab-size: 2;
   white-space: pre;
+  word-break: normal;
 }
 
 .editor-input-layer::selection {
@@ -815,10 +973,42 @@ kbd {
 
 .terminal-body pre {
   margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
+.terminal-line.input,
 .terminal-prompt {
   color: var(--success);
+}
+
+.terminal-line.stderr {
+  color: var(--error);
+}
+
+.terminal-line.system {
+  color: var(--text-lighter);
+}
+
+.terminal-input-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.terminal-input-row input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.terminal-input-row input:disabled {
+  color: var(--text-muted);
 }
 
 /* ============================================================

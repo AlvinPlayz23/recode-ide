@@ -1,16 +1,16 @@
-interface Token {
+export interface HighlightToken {
   value: string;
   kind: "keyword" | "string" | "comment" | "number" | "plain";
 }
 
 const keywordPattern = /\b(import|from|export|function|const|let|return|if|else|type|interface|struct|fn|pub|mod|use|async|await)\b/g;
 
-export function tokenizeLine(line: string, languageId: string): Token[] {
+export function tokenizeLine(line: string, languageId: string): HighlightToken[] {
   if (line.trimStart().startsWith("//") || line.trimStart().startsWith("#")) {
     return [{ value: line, kind: "comment" }];
   }
 
-  const tokens: Token[] = [];
+  const tokens: HighlightToken[] = [];
   let cursor = 0;
   const regex = /(".*?"|'.*?'|`.*?`|\b\d+(?:\.\d+)?\b|\b(import|from|export|function|const|let|return|if|else|type|interface|struct|fn|pub|mod|use|async|await)\b)/g;
 

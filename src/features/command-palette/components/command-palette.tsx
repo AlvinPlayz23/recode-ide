@@ -18,6 +18,8 @@ export function CommandPalette() {
   const close = useCommandPaletteStore((state) => state.actions.close);
   const openFolder = useProjectStore((state) => state.actions.openFolder);
   const saveActiveBuffer = useEditorStore((state) => state.actions.saveActiveBuffer);
+  const saveBufferAs = useEditorStore((state) => state.actions.saveBufferAs);
+  const revertBuffer = useEditorStore((state) => state.actions.revertBuffer);
   const activeBufferId = useEditorStore((state) => state.activeBufferId);
   const toggleInspector = useWorkbenchStore((state) => state.actions.toggleInspector);
   const toggleTerminal = useWorkbenchStore((state) => state.actions.toggleTerminal);
@@ -49,6 +51,28 @@ export function CommandPalette() {
         },
       },
       {
+        id: "save-file-as",
+        title: "Save Active File As...",
+        detail: activeBufferId ? "Write current buffer to another path" : "No active file",
+        icon: <PlusIcon />,
+        disabled: !activeBufferId,
+        run: async () => {
+          if (activeBufferId) await saveBufferAs(activeBufferId);
+          close();
+        },
+      },
+      {
+        id: "revert-file",
+        title: "Revert Active File",
+        detail: activeBufferId ? "Reload current buffer from disk" : "No active file",
+        icon: <PlusIcon />,
+        disabled: !activeBufferId,
+        run: async () => {
+          if (activeBufferId) await revertBuffer(activeBufferId);
+          close();
+        },
+      },
+      {
         id: "toggle-agent",
         title: "Toggle Agent Inspector",
         detail: "Show or hide the right-side AI inspector",
@@ -69,7 +93,16 @@ export function CommandPalette() {
         },
       },
     ],
-    [activeBufferId, close, openFolder, saveActiveBuffer, toggleInspector, toggleTerminal],
+    [
+      activeBufferId,
+      close,
+      openFolder,
+      revertBuffer,
+      saveActiveBuffer,
+      saveBufferAs,
+      toggleInspector,
+      toggleTerminal,
+    ],
   );
 
   const filteredCommands = commands.filter((command) =>
@@ -82,11 +115,15 @@ export function CommandPalette() {
         event.preventDefault();
         open();
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveActiveBuffer();
+      }
       if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [close, open]);
+  }, [close, open, saveActiveBuffer]);
 
   useEffect(() => {
     if (isOpen) setQuery("");

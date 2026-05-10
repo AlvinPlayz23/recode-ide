@@ -1,4 +1,5 @@
 import { useEditorStore } from "@/features/editor/stores/editor-store";
+import { useGitStore } from "@/features/git/stores/git-store";
 import { useProjectStore } from "@/features/project/stores/project-store";
 import { useWorkbenchStore } from "@/features/window/stores/workbench-store";
 import {
@@ -14,11 +15,16 @@ export function StatusBar() {
   const activeBuffer = useEditorStore((state) =>
     state.buffers.find((buffer) => buffer.id === state.activeBufferId),
   );
+  const saveStatus = useEditorStore((state) => state.lastSaveStatus);
+  const saveError = useEditorStore((state) => state.lastSaveError);
+  const gitStatus = useGitStore((state) => state.status);
   const toggleTerminal = useWorkbenchStore((state) => state.actions.toggleTerminal);
 
   const lineCount = activeBuffer ? activeBuffer.content.split("\n").length : 0;
   const cursor = activeBuffer?.cursor;
   const workspaceLabel = rootPath ? rootPath.split(/[\\/]/).filter(Boolean).at(-1) : "demo";
+  const dirty = activeBuffer ? activeBuffer.content !== activeBuffer.savedContent : false;
+  const changedFiles = gitStatus?.files.length ?? 0;
 
   return (
     <footer className="status-bar">
@@ -27,13 +33,13 @@ export function StatusBar() {
           <span className="status-icon">
             <BranchIcon />
           </span>
-          main
+          {gitStatus?.branch ?? "no git"}
         </span>
         <span className="status-item">
           <span className="status-icon">
             <CheckIcon />
           </span>
-          0
+          {changedFiles}
         </span>
         <span className="status-item">
           <span className="status-icon">
@@ -51,6 +57,13 @@ export function StatusBar() {
               Ln {(cursor?.line ?? 0) + 1}, Col {(cursor?.column ?? 0) + 1}
             </span>
             <span className="status-item">{lineCount} lines</span>
+            {dirty ? <span className="status-item warning">Unsaved</span> : null}
+            {activeBuffer.externalState === "modified" ? (
+              <span className="status-item warning">Changed on disk</span>
+            ) : null}
+            {activeBuffer.externalState === "deleted" ? (
+              <span className="status-item warning">Deleted on disk</span>
+            ) : null}
             <span className="status-item">UTF-8</span>
             <span className="status-item">{activeBuffer.languageId.toUpperCase()}</span>
           </>
@@ -73,6 +86,13 @@ export function StatusBar() {
           </span>
           Approval mode
         </span>
+        {saveStatus === "saving" ? <span className="status-item">Saving...</span> : null}
+        {saveStatus === "saved" ? <span className="status-item accent">Saved</span> : null}
+        {saveStatus === "error" ? (
+          <span className="status-item warning" title={saveError ?? undefined}>
+            Save failed
+          </span>
+        ) : null}
       </div>
     </footer>
   );

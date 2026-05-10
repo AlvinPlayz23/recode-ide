@@ -4,6 +4,7 @@ import { CommandPalette } from "@/features/command-palette/components/command-pa
 import { HybridEditor } from "@/features/editor/components/hybrid-editor";
 import { useEditorStore } from "@/features/editor/stores/editor-store";
 import { FileExplorer } from "@/features/file-explorer/components/file-explorer";
+import { useFileWatcherStore } from "@/features/project/stores/file-watcher-store";
 import { useProjectStore } from "@/features/project/stores/project-store";
 import { TerminalPanel } from "@/features/terminal/components/terminal-panel";
 import { TabBar } from "@/features/tabs/components/tab-bar";
@@ -19,12 +20,18 @@ export function App() {
   const bootstrapDemoWorkspace = useProjectStore(
     (state) => state.actions.bootstrapDemoWorkspace,
   );
+  const restoreRecentWorkspace = useProjectStore(
+    (state) => state.actions.restoreRecentWorkspace,
+  );
+  const initializeFileWatcher = useFileWatcherStore((state) => state.actions.initialize);
   const isInspectorVisible = useWorkbenchStore((state) => state.isInspectorVisible);
   const isTerminalVisible = useWorkbenchStore((state) => state.isTerminalVisible);
 
   useEffect(() => {
     bootstrapDemoWorkspace();
-  }, [bootstrapDemoWorkspace]);
+    void initializeFileWatcher();
+    void restoreRecentWorkspace();
+  }, [bootstrapDemoWorkspace, initializeFileWatcher, restoreRecentWorkspace]);
 
   return (
     <div className="app-shell">

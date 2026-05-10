@@ -23,7 +23,11 @@ export function TabBar() {
               type="button"
               className="tab-label"
               onClick={() => setActiveBuffer(buffer.id)}
-              title={buffer.path}
+              title={
+                buffer.externalState === "none"
+                  ? buffer.path
+                  : `${buffer.path} (${buffer.externalState === "deleted" ? "deleted" : "changed"} on disk)`
+              }
             >
               <span className="tab-icon">
                 <FileIcon size={13} />
