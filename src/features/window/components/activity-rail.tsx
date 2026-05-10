@@ -3,6 +3,7 @@ import {
   ExtensionIcon,
   FilesIcon,
   GitIcon,
+  ErrorIcon,
   SearchIcon,
   SettingsIcon,
   SparkleIcon,
@@ -13,6 +14,7 @@ const PRIMARY_VIEWS = [
   { id: "files", label: "Files", icon: <FilesIcon size={18} /> },
   { id: "search", label: "Search", icon: <SearchIcon size={18} /> },
   { id: "git", label: "Source Control", icon: <GitIcon size={18} /> },
+  { id: "diagnostics", label: "Diagnostics", icon: <ErrorIcon size={18} /> },
   { id: "debug", label: "Run and Debug", icon: <BugIcon size={18} /> },
   { id: "extensions", label: "Extensions", icon: <ExtensionIcon size={18} /> },
 ] as const;

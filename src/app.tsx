@@ -15,11 +15,13 @@ import { ActivityRail } from "@/features/window/components/activity-rail";
 import { SidebarPanel } from "@/features/window/components/sidebar-panel";
 import { StatusBar } from "@/features/window/components/status-bar";
 import { TitleBar } from "@/features/window/components/title-bar";
+import { useMenuEventsWrapper } from "@/features/window/hooks/use-menu-events-wrapper";
 import { useWorkbenchStore } from "@/features/window/stores/workbench-store";
 
 export function App() {
   useRegisterCoreCommands();
   useGlobalKeymaps();
+  useMenuEventsWrapper();
 
   const activeBuffer = useEditorStore((state) =>
     state.buffers.find((buffer) => buffer.id === state.activeBufferId),

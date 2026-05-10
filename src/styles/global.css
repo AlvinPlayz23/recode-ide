@@ -1608,6 +1608,91 @@ kbd {
   white-space: pre;
 }
 
+.diagnostics-panel {
+  display: grid;
+  grid-template-rows: 32px 28px minmax(0, 1fr);
+}
+
+.diagnostics-list {
+  overflow: auto;
+  min-height: 0;
+}
+
+.diagnostic-group {
+  border-top: 1px solid var(--divider);
+}
+
+.diagnostic-file-title {
+  overflow: hidden;
+  padding: 7px 10px 5px;
+  color: var(--text-light);
+  font-size: var(--ui-text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostic-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-light);
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.diagnostic-row:hover {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+.diagnostic-severity {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: rgba(95, 185, 255, 0.14);
+  color: var(--info);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.diagnostic-row.error .diagnostic-severity {
+  background: rgba(239, 111, 111, 0.14);
+  color: var(--error);
+}
+
+.diagnostic-row.warning .diagnostic-severity {
+  background: rgba(240, 180, 65, 0.14);
+  color: var(--warning);
+}
+
+.diagnostic-message {
+  overflow: hidden;
+  font-size: var(--ui-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostic-location {
+  color: var(--text-lighter);
+  font-size: var(--ui-text-xs);
+}
+
+.diagnostic-source {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--ui-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ============================================================
  * Toasts
  * ============================================================ */

@@ -22,7 +22,6 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const updateBufferContent = useEditorStore((state) => state.actions.updateBufferContent);
-  const saveBuffer = useEditorStore((state) => state.actions.saveBuffer);
   const undo = useEditorStore((state) => state.actions.undo);
   const redo = useEditorStore((state) => state.actions.redo);
   const setCursor = useEditorStore((state) => state.actions.setCursor);
@@ -187,12 +186,6 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     if ((event.ctrlKey || event.metaKey) && event.key === " ") {
       event.preventDefault();
       void requestCompletions();
-      return;
-    }
-
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      void saveBuffer(buffer.id);
       return;
     }
 

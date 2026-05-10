@@ -36,6 +36,8 @@ class KeymapRegistry {
   }
 
   async handleKeyboardEvent(event: KeyboardEvent) {
+    if (event.repeat) return false;
+
     const normalized = normalizeKeyboardEvent(event);
     const match = this.keybindings.find(
       (keybinding) => keybinding.enabled !== false && keybinding.key === normalized,

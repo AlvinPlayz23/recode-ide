@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { commandRegistry } from "@/features/commands/command-registry";
 import { keymapRegistry } from "@/features/commands/keymap-registry";
 import { useCommandPaletteStore } from "@/features/command-palette/stores/command-palette-store";
+import { handleSave, handleSaveAs } from "@/features/editor/services/editor-app-actions";
 import { useEditorStore } from "@/features/editor/stores/editor-store";
 import { useProjectStore } from "@/features/project/stores/project-store";
 import { useQuickOpenStore } from "@/features/quick-open/stores/quick-open-store";
@@ -19,8 +20,6 @@ export function useRegisterCoreCommands() {
   const openFolder = useProjectStore((state) => state.actions.openFolder);
   const openQuickOpen = useQuickOpenStore((state) => state.actions.open);
   const activeBufferId = useEditorStore((state) => state.activeBufferId);
-  const saveActiveBuffer = useEditorStore((state) => state.actions.saveActiveBuffer);
-  const saveBufferAs = useEditorStore((state) => state.actions.saveBufferAs);
   const revertBuffer = useEditorStore((state) => state.actions.revertBuffer);
   const toggleInspector = useWorkbenchStore((state) => state.actions.toggleInspector);
   const toggleTerminal = useWorkbenchStore((state) => state.actions.toggleTerminal);
@@ -55,7 +54,7 @@ export function useRegisterCoreCommands() {
         icon: <PlusIcon />,
         when: () => Boolean(useEditorStore.getState().activeBufferId),
         execute: async () => {
-          await saveActiveBuffer();
+          await handleSave();
           closePalette();
         },
       },
@@ -67,8 +66,7 @@ export function useRegisterCoreCommands() {
         icon: <PlusIcon />,
         when: () => Boolean(useEditorStore.getState().activeBufferId),
         execute: async () => {
-          const bufferId = useEditorStore.getState().activeBufferId;
-          if (bufferId) await saveBufferAs(bufferId);
+          await handleSaveAs();
           closePalette();
         },
       },
@@ -117,6 +115,16 @@ export function useRegisterCoreCommands() {
         },
       },
       {
+        id: "workbench.showDiagnostics",
+        title: "Show Diagnostics",
+        category: "Workbench",
+        detail: "Open the diagnostics sidebar",
+        execute: () => {
+          setActiveSidebarView("diagnostics");
+          closePalette();
+        },
+      },
+      {
         id: "workbench.toggleInspector",
         title: "Toggle Agent Inspector",
         category: "Workbench",
@@ -157,6 +165,7 @@ export function useRegisterCoreCommands() {
       { key: "Mod+P", command: "file.quickOpen", source: "default" },
       { key: "Mod+Shift+F", command: "workbench.showSearch", source: "default" },
       { key: "Mod+Shift+G", command: "workbench.showSourceControl", source: "default" },
+      { key: "Mod+Shift+M", command: "workbench.showDiagnostics", source: "default" },
       { key: "Mod+S", command: "file.save", source: "default" },
       { key: "Mod+Shift+S", command: "file.saveAs", source: "default" },
       { key: "Mod+`", command: "workbench.toggleTerminal", source: "default" },
@@ -168,8 +177,6 @@ export function useRegisterCoreCommands() {
     openPalette,
     openQuickOpen,
     revertBuffer,
-    saveActiveBuffer,
-    saveBufferAs,
     setActiveSidebarView,
     showTerminal,
     toggleInspector,
