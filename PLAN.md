@@ -5,6 +5,8 @@ Recode is a fresh Tauri-based AI code editor inspired by Athas’s architecture 
 
 The implementation should be original to Recode, but Athas is the primary reference for what a complete product needs: project/session management, filesystem operations, custom editor layers, terminal PTY, source control, LSP, diagnostics, command/keymap infrastructure, AI agent workflows, settings, runtime/tooling, and release readiness.
 
+Standing instruction: before implementing or changing any sizeable feature, inspect the corresponding Athas source first. Directly adapt, copy small structural patterns, or closely mirror Athas code when it improves correctness and fits Recode's architecture. CodeEdit remains UX direction only; Athas is the engineering reference.
+
 ## Athas Reference Map
 Use these Athas areas heavily when designing equivalent Recode systems:
 
@@ -137,6 +139,7 @@ Goal: move from text editor to code editor.
 - Incremental/viewport tokenization worker.
 - Fold regions and folding gutter.
 - LSP manager: start/stop per workspace/file, document open/change/save/close.
+- Current LSP backend is a Recode facade for diagnostics/completions. Later, swap it to a real external LSP manager using Athas' `LspManager` pattern while keeping the frontend service API stable.
 - Hover, completions, signature help, go to definition, references.
 - Rename symbol and workspace edits.
 - Diagnostics store and diagnostics panel.

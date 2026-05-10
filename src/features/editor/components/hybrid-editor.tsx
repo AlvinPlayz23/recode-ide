@@ -33,6 +33,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const [isFindVisible, setIsFindVisible] = useState(false);
   const [tokenizedLines, setTokenizedLines] = useState<HighlightToken[][]>([]);
   const [completionItems, setCompletionItems] = useState<RecodeCompletionItem[]>([]);
+  const [isCompletionDropdownVisible, setIsCompletionDropdownVisible] = useState(false);
   const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(0);
   const setDiagnostics = useDiagnosticsStore((state) => state.actions.setDiagnostics);
   const diagnostics = useDiagnosticsStore(
@@ -61,6 +62,19 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     }
     return map;
   }, [diagnostics]);
+  const ghostCompletion = useMemo(() => {
+    if (!buffer || completionItems.length === 0) return null;
+    const prefix = currentWordPrefix(buffer.content, buffer.selection.end);
+    const topItem = completionItems[0];
+    if (prefix.length < 2) return null;
+    if (!topItem.insertText.toLowerCase().startsWith(prefix.toLowerCase())) return null;
+    if (topItem.insertText.length <= prefix.length) return null;
+
+    return {
+      text: topItem.insertText.slice(prefix.length),
+      item: topItem,
+    };
+  }, [buffer, completionItems]);
 
   useEffect(() => {
     if (!viewportRef.current) return;
@@ -122,6 +136,28 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     };
   }, [buffer?.content, buffer?.languageId, buffer?.path, setDiagnostics]);
 
+  useEffect(() => {
+    if (!buffer) return;
+    const prefix = currentWordPrefix(buffer.content, buffer.selection.end);
+    if (prefix.length < 2) {
+      setCompletionItems([]);
+      setIsCompletionDropdownVisible(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void requestCompletions({ showDropdown: false }).then(() => {
+        if (cancelled) return;
+      });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [buffer?.content, buffer?.languageId, buffer?.selection.end]);
+
   if (!buffer) {
     return (
       <section className="editor-empty">
@@ -138,7 +174,6 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   }
 
   const handleInput = (content: string) => {
-    setCompletionItems([]);
     updateBufferContent(buffer.id, content);
     const input = inputRef.current;
     if (!input) return;
@@ -152,6 +187,9 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   const handleSelectionChange = () => {
     const input = inputRef.current;
     if (!input) return;
+    if (buffer.selection.end !== input.selectionEnd) {
+      setIsCompletionDropdownVisible(false);
+    }
     setSelection(buffer.id, {
       start: input.selectionStart,
       end: input.selectionEnd,
@@ -160,7 +198,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (completionItems.length > 0) {
+    if (isCompletionDropdownVisible && completionItems.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setSelectedCompletionIndex((index) => Math.min(index + 1, completionItems.length - 1));
@@ -179,13 +217,21 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
       if (event.key === "Escape") {
         event.preventDefault();
         setCompletionItems([]);
+        setIsCompletionDropdownVisible(false);
         return;
       }
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key === " ") {
       event.preventDefault();
-      void requestCompletions();
+      void requestCompletions({ showDropdown: true });
+      return;
+    }
+
+    if (event.key === "Escape" && ghostCompletion) {
+      event.preventDefault();
+      setCompletionItems([]);
+      setIsCompletionDropdownVisible(false);
       return;
     }
 
@@ -218,6 +264,11 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
 
     if (event.key === "Tab") {
       event.preventDefault();
+      if (ghostCompletion) {
+        applyCompletion(ghostCompletion.item);
+        return;
+      }
+
       const input = inputRef.current;
       if (!input) return;
 
@@ -237,7 +288,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     }
   };
 
-  const requestCompletions = async () => {
+  const requestCompletions = async ({ showDropdown }: { showDropdown: boolean }) => {
     const input = inputRef.current;
     if (!input) return;
     const position = offsetToPosition(input.value, input.selectionEnd);
@@ -249,6 +300,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     });
     setSelectedCompletionIndex(0);
     setCompletionItems(items);
+    setIsCompletionDropdownVisible(showDropdown && items.length > 0);
   };
 
   const applyCompletion = (item?: RecodeCompletionItem) => {
@@ -268,6 +320,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
     setSelection(buffer.id, { start: nextOffset, end: nextOffset });
     setCursor(buffer.id, offsetToPosition(nextValue, nextOffset));
     setCompletionItems([]);
+    setIsCompletionDropdownVisible(false);
   };
 
   return (
@@ -345,6 +398,18 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
           })}
         </div>
       </div>
+      {ghostCompletion ? (
+        <span
+          className="ghost-completion"
+          style={{
+            top: (buffer.cursor.line + 1) * lineHeight - scrollTop - lineHeight,
+            left: 48 + buffer.cursor.column * 7.83,
+          }}
+          aria-hidden="true"
+        >
+          {ghostCompletion.text}
+        </span>
+      ) : null}
       <textarea
         ref={inputRef}
         className="editor-input-layer"
@@ -363,7 +428,7 @@ export function HybridEditor({ buffer }: HybridEditorProps) {
         onScroll={(event) => setScrollTop(buffer.id, event.currentTarget.scrollTop)}
       />
       <CompletionDropdown
-        items={completionItems}
+        items={isCompletionDropdownVisible ? completionItems : []}
         selectedIndex={selectedCompletionIndex}
         line={buffer.cursor.line}
         column={buffer.cursor.column}
@@ -487,4 +552,9 @@ function findWordStart(content: string, offset: number) {
     index -= 1;
   }
   return index;
+}
+
+function currentWordPrefix(content: string, offset: number) {
+  const start = findWordStart(content, offset);
+  return content.slice(start, offset);
 }

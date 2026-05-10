@@ -2,6 +2,8 @@
 
 Recode's Tauri backend should follow Athas' domain-oriented structure. Do not add new commands or business logic directly to `src-tauri/src/lib.rs`.
 
+Before adding or changing backend features, inspect the equivalent Athas module first and mirror its structure where practical. Direct adaptation is allowed when it fits Recode.
+
 ## Required Shape
 
 `src-tauri/src/lib.rs` is app wiring only:

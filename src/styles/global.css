@@ -891,6 +891,15 @@ kbd {
   font-family: var(--font-sans);
 }
 
+.ghost-completion {
+  position: absolute;
+  z-index: 4;
+  color: rgba(170, 177, 191, 0.42);
+  font: 13px / 22px var(--font-mono);
+  pointer-events: none;
+  white-space: pre;
+}
+
 .completion-dropdown button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

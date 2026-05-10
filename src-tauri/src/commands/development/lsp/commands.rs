@@ -1,54 +1,101 @@
-use serde::{Deserialize, Serialize};
+use super::types::{
+    LspCompletionsRequest, LspDiagnosticsRequest, LspRange, LspRangePosition,
+    RecodeCompletionItem, RecodeDiagnostic,
+};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LspDiagnosticsRequest {
+#[derive(Debug, Clone)]
+pub struct LspDocument {
+    content: String,
+    #[allow(dead_code)]
+    language_id: Option<String>,
+    version: i32,
+}
+
+#[derive(Default)]
+pub struct LspDocuments {
+    documents: Mutex<HashMap<String, LspDocument>>,
+}
+
+impl LspDocuments {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[tauri::command]
+pub fn lsp_document_open(
+    documents: tauri::State<'_, Arc<LspDocuments>>,
     file_path: String,
     content: String,
-    language_id: String,
+    language_id: Option<String>,
+) -> Result<(), String> {
+    documents
+        .documents
+        .lock()
+        .map_err(|_| "LSP document lock poisoned".to_string())?
+        .insert(
+            file_path,
+            LspDocument {
+                content,
+                language_id,
+                version: 1,
+            },
+        );
+    Ok(())
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LspCompletionsRequest {
-    content: String,
-    language_id: String,
-    line: usize,
-    character: usize,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LspRangePosition {
-    line: usize,
-    character: usize,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LspRange {
-    start: LspRangePosition,
-    end: LspRangePosition,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecodeDiagnostic {
+#[tauri::command]
+pub fn lsp_document_change(
+    documents: tauri::State<'_, Arc<LspDocuments>>,
     file_path: String,
-    range: LspRange,
-    severity: String,
-    message: String,
-    source: String,
+    content: String,
+    version: i32,
+) -> Result<(), String> {
+    let mut guard = documents
+        .documents
+        .lock()
+        .map_err(|_| "LSP document lock poisoned".to_string())?;
+    let document = guard.entry(file_path).or_insert_with(|| LspDocument {
+        content: String::new(),
+        language_id: None,
+        version,
+    });
+    document.content = content;
+    document.version = version;
+    Ok(())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecodeCompletionItem {
-    label: String,
-    detail: String,
-    kind: String,
-    insert_text: String,
+#[tauri::command]
+pub fn lsp_document_save(
+    documents: tauri::State<'_, Arc<LspDocuments>>,
+    file_path: String,
+    content: Option<String>,
+) -> Result<(), String> {
+    let mut guard = documents
+        .documents
+        .lock()
+        .map_err(|_| "LSP document lock poisoned".to_string())?;
+    if let Some(document) = guard.get_mut(&file_path) {
+        if let Some(content) = content {
+            document.content = content;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn lsp_document_close(
+    documents: tauri::State<'_, Arc<LspDocuments>>,
+    file_path: String,
+) -> Result<(), String> {
+    documents
+        .documents
+        .lock()
+        .map_err(|_| "LSP document lock poisoned".to_string())?
+        .remove(&file_path);
+    Ok(())
 }
 
 #[tauri::command]

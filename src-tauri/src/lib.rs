@@ -4,6 +4,7 @@ mod terminal;
 use commands::*;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use commands::development::lsp::commands::LspDocuments;
 use terminal::TerminalSessions;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -31,6 +32,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Arc::new(FileWatcher::new(app.handle().clone())));
             app.manage(Arc::new(TerminalSessions::new()));
+            app.manage(Arc::new(LspDocuments::new()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +53,10 @@ pub fn run() {
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_kill,
+            lsp_document_open,
+            lsp_document_change,
+            lsp_document_save,
+            lsp_document_close,
             lsp_get_diagnostics,
             lsp_get_completions
         ])

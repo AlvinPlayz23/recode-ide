@@ -4,6 +4,12 @@ import {
   readFile,
   writeFile,
 } from "@/features/file-explorer/services/file-service";
+import {
+  notifyDocumentChange,
+  notifyDocumentClose,
+  notifyDocumentOpen,
+  notifyDocumentSave,
+} from "@/features/lsp/services/lsp-service";
 import { useToastStore } from "@/features/notifications/stores/toast-store";
 import { useFileWatcherStore } from "@/features/project/stores/file-watcher-store";
 
@@ -40,6 +46,7 @@ export interface EditorBuffer {
   redoStack: string[];
   lastEditAt: number;
   externalState: "none" | "modified" | "deleted";
+  lspVersion: number;
 }
 
 interface OpenBufferInput {
@@ -112,15 +119,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         redoStack: [],
         lastEditAt: 0,
         externalState: "none",
+        lspVersion: 1,
       };
 
       set((state) => ({
         buffers: [...state.buffers, nextBuffer],
         activeBufferId: nextBuffer.id,
       }));
+      void notifyDocumentOpen({
+        filePath: nextBuffer.path,
+        content: nextBuffer.content,
+        languageId: nextBuffer.languageId,
+      }).catch((error) => console.warn("LSP document open failed", error));
     },
     closeBuffer: (bufferId) => {
       const buffer = get().buffers.find((candidate) => candidate.id === bufferId);
+      if (!buffer) return;
       if (buffer && buffer.content !== buffer.savedContent) {
         const shouldClose = window.confirm(`Close "${buffer.name}" without saving changes?`);
         if (!shouldClose) return;
@@ -132,6 +146,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           state.activeBufferId === bufferId ? (buffers.at(-1)?.id ?? null) : state.activeBufferId;
         return { buffers, activeBufferId };
       });
+      void notifyDocumentClose(buffer.path).catch((error) =>
+        console.warn("LSP document close failed", error),
+      );
     },
     setActiveBuffer: (bufferId) => set({ activeBufferId: bufferId }),
     updateBufferContent: (bufferId, content, options) => {
@@ -147,6 +164,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             ? [...buffer.undoStack, buffer.content].slice(-maxUndoEntries)
             : buffer.undoStack;
           const searchMatches = findSearchMatches(content, buffer.searchQuery);
+          const lspVersion = buffer.lspVersion + 1;
           const activeSearchMatchIndex =
             searchMatches.length === 0
               ? -1
@@ -160,9 +178,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             redoStack: options?.pushUndo === false ? buffer.redoStack : [],
             lastEditAt: now,
             externalState: "none",
+            lspVersion,
           };
         }),
       }));
+      const buffer = get().buffers.find((candidate) => candidate.id === bufferId);
+      if (buffer) {
+        void notifyDocumentChange({
+          filePath: buffer.path,
+          content,
+          version: buffer.lspVersion,
+        }).catch((error) => console.warn("LSP document change failed", error));
+      }
     },
     saveBuffer: async (bufferId) => {
       const buffer = get().buffers.find((candidate) => candidate.id === bufferId);
@@ -189,6 +216,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : candidate,
         ),
       }));
+      void notifyDocumentSave({ filePath: buffer.path, content: buffer.content }).catch((error) =>
+        console.warn("LSP document save failed", error),
+      );
       useToastStore.getState().actions.success("Saved", buffer.name);
       return true;
     },
@@ -232,6 +262,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : candidate,
         ),
       }));
+      void notifyDocumentClose(buffer.path).catch((error) =>
+        console.warn("LSP document close failed", error),
+      );
+      void notifyDocumentOpen({
+        filePath: nextPath,
+        content: buffer.content,
+        languageId: buffer.languageId,
+      }).catch((error) => console.warn("LSP document open failed", error));
+      void notifyDocumentSave({ filePath: nextPath, content: buffer.content }).catch((error) =>
+        console.warn("LSP document save failed", error),
+      );
       useToastStore.getState().actions.success("Saved As", basename(nextPath));
       return true;
     },

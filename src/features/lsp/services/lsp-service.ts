@@ -33,6 +33,33 @@ export async function getDiagnostics(input: {
   return invoke<RecodeDiagnostic[]>("lsp_get_diagnostics", { request: input });
 }
 
+export async function notifyDocumentOpen(input: {
+  filePath: string;
+  content: string;
+  languageId?: string;
+}) {
+  return invoke<void>("lsp_document_open", input);
+}
+
+export async function notifyDocumentChange(input: {
+  filePath: string;
+  content: string;
+  version: number;
+}) {
+  return invoke<void>("lsp_document_change", input);
+}
+
+export async function notifyDocumentSave(input: {
+  filePath: string;
+  content?: string;
+}) {
+  return invoke<void>("lsp_document_save", input);
+}
+
+export async function notifyDocumentClose(filePath: string) {
+  return invoke<void>("lsp_document_close", { filePath });
+}
+
 export async function getCompletions(input: {
   content: string;
   languageId: string;
